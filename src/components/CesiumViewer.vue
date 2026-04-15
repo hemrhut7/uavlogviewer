@@ -26,7 +26,7 @@ import {
     createDefaultImageryProviderViewModels,
     ProviderViewModel,
     UrlTemplateImageryProvider,
-    Viewer, createWorldTerrainAsync,
+    Viewer,
     PointPrimitiveCollection,
     ImageryLayer,
     IonImageryProvider,
@@ -140,14 +140,7 @@ export default {
     methods: {
         async asyncSetup () {
             if (this.viewer == null) {
-                if (this.state.isOnline) {
-                    this.viewer = this.createViewer(true)
-                    if (this.state.vehicle !== 'boat') {
-                        this.viewer.terrainProvider = await createWorldTerrainAsync()
-                    }
-                } else {
-                    this.viewer = this.createViewer(false)
-                }
+                this.viewer = this.createViewer(false)
                 this.viewer.scene.debugShowFramesPerSecond = true
 
                 this.viewer.scene.postProcessStages.ambientOcclusion.enabled = false
@@ -227,12 +220,7 @@ export default {
                 this.correctedTrajectory.push(Cartographic.fromDegrees(pos[0], pos[1], pos[2]))
             }
 
-            if (this.state.vehicle !== 'boat' && this.state.isOnline) {
-                const promise = sampleTerrainMostDetailed(this.viewer.terrainProvider, this.correctedTrajectory)
-                promise.then(async (result) => { await this.setup2(result) })
-            } else {
-                this.setup2(this.correctedTrajectory)
-            }
+            this.setup2(this.correctedTrajectory)
         },
         updateShader () {
             // eslint-disable-next-line camelcase
