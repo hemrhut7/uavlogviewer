@@ -1,5 +1,5 @@
 <template>
-    <div id="line" ref="line" style="width:100%;height: 100%"></div>
+    <div :id="'plot-' + chartIndex" ref="line" style="width:100%;height: 100%"></div>
 </template>
 
 <script>
@@ -161,7 +161,7 @@ export default {
     },
     mounted () {
         const WIDTH_IN_PERCENT_OF_PARENT = 90
-        d3.select('#line')
+        d3.select(this.$refs.line)
             .append('div')
             .style({
                 width: '100%',
@@ -169,7 +169,7 @@ export default {
                 height: '100%'
             })
 
-        this.gd = d3.select('#line').node()
+        this.gd = this.$refs.line
         const _this = this
         this.$nextTick(function () {
             if (this.$route.query.ranges) {

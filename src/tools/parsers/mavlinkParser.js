@@ -78,6 +78,7 @@ function getModeString (mavtype, cmode, basemode) {
     }
 }
 
+const rad2deg = 180 / Math.PI
 let instance
 
 export class MavlinkParser {
@@ -102,6 +103,27 @@ export class MavlinkParser {
             message.lon = message.lon / 10000000
             // eslint-disable-next-line
             message.relative_alt = message.relative_alt / 1000
+            return message
+        } else if (message._name === 'ATTITUDE') {
+            message.roll = message.roll * rad2deg
+            message.pitch = message.pitch * rad2deg
+            message.yaw = message.yaw * rad2deg
+            message.rollspeed = message.rollspeed * rad2deg
+            message.pitchspeed = message.pitchspeed * rad2deg
+            message.yawspeed = message.yawspeed * rad2deg
+            return message
+        } else if (message._name === 'AHRS2' || message._name === 'AHRS3') {
+            message.roll = message.roll * rad2deg
+            message.pitch = message.pitch * rad2deg
+            message.yaw = message.yaw * rad2deg
+            return message
+        } else if (message._name === 'SIMSTATE') {
+            message.roll = message.roll * rad2deg
+            message.pitch = message.pitch * rad2deg
+            message.yaw = message.yaw * rad2deg
+            message.xgyro = message.xgyro * rad2deg
+            message.ygyro = message.ygyro * rad2deg
+            message.zgyro = message.zgyro * rad2deg
             return message
         } else if (message._name === 'HEARTBEAT') {
             message.asText = getModeString(message.type, message.custom_mode, message.base_mode)
@@ -196,7 +218,10 @@ export class MavlinkParser {
         }
 
         if (instance.isDoneLoading) {
-            self.postMessage({ messages: instance.messages })
+            self.postMessage({ messageType: fullName, messageList: mergedData })
+            if (!(name in instance.messages) || Number(sysid) === 1) {
+                self.postMessage({ messageType: name, messageList: mergedData })
+            }
         }
     }
 
@@ -257,7 +282,12 @@ export class MavlinkParser {
 
         instance.isDoneLoading = true
         self.postMessage({ availableMessages: instance.availableMessages })
-        self.postMessage({ messages: instance.messages })
+        
+        // Stream data back piecemeal to avoid OOM crash due to massive IPC monolithic serialization
+        for (const key in instance.messages) {
+            self.postMessage({ messageType: key, messageList: instance.messages[key] })
+        }
+        
         self.postMessage({ messagesDoneLoading: true })
         // self.postMessage({done: true})
         return { types: messageTypes, messages: instance.messages }
