@@ -48,6 +48,12 @@ export const store = {
     attitudeSource: null,
     showWaypoints: true,
     cameraType: 'follow',
+    charts: [
+        {
+            expressions: [],
+            expressionErrors: []
+        }
+    ],
     expressions: [], // holds message name
     expressionErrors: [],
     plotCache: {},

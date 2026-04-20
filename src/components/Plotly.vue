@@ -213,6 +213,12 @@ export default {
         this.$eventHub.$off('togglePlot')
         clearInterval(this.interval)
     },
+    props: {
+        chartIndex: {
+            type: Number,
+            default: 0
+        }
+    },
     data () {
         return {
             gd: null,
@@ -426,7 +432,7 @@ export default {
             }
         },
         isPlotted (fieldname) {
-            for (const field of this.state.expressions) {
+            for (const field of this.chart.expressions) {
                 if (field.name === fieldname) {
                     return true
                 }
@@ -437,7 +443,7 @@ export default {
             // get free axis number
             for (const i of this.state.allAxis) {
                 let taken = false
-                for (const field of this.state.expressions) {
+                for (const field of this.chart.expressions) {
                     // eslint-disable-next-line
                     if (field.axis == i) {
                         taken = true
@@ -453,7 +459,7 @@ export default {
             // get free color
             for (const i of this.state.allColors) {
                 let taken = false
-                for (const field of this.state.expressions) {
+                for (const field of this.chart.expressions) {
                     // eslint-disable-next-line
                     if (field.color == i) {
                         taken = true
@@ -524,24 +530,23 @@ export default {
                     newplots.push(this.createNewField(expression, axis, color))
                 }
             }
-            this.state.expressions.push(...newplots)
+            this.chart.expressions.push(...newplots)
         },
         removePlot (fieldname) {
-            const index = this.state.expressions.indexOf(fieldname) // <-- Not supported in <IE9
+            const index = this.chart.expressions.indexOf(fieldname) // <-- Not supported in <IE9
             if (index !== -1) {
-                this.state.expressions = this.state.expressions.splice(index, 1)
+                this.chart.expressions.splice(index, 1)
             }
             this.plot()
-            if (this.state.expressions.length === 0) {
-                this.state.plotOn = false
+            if (this.chart.expressions.length === 0) {
+                // this.state.plotOn = false // don't turn off globally yet
             }
             this.onRangeChanged()
         },
         clearPlot () {
-            while (this.state.expressions.length) {
-                this.state.expressions.pop()
+            while (this.chart.expressions.length) {
+                this.chart.expressions.pop()
             }
-            this.state.expressions.lenght = 0
         },
         resetAxis (index) {
             // Resets the Y axis so that the next plot autoranges
@@ -558,21 +563,21 @@ export default {
         togglePlot (fieldname, axis, color, silent) {
             if (this.isPlotted((fieldname))) {
                 let index
-                for (const i in this.state.expressions) {
-                    if (this.state.expressions[i].name === fieldname) {
+                for (const i in this.chart.expressions) {
+                    if (this.chart.expressions[i].name === fieldname) {
                         index = i
                     }
                 }
-                this.resetAxis(this.state.expressions[index].axis)
-                this.state.expressions.splice(index, 1)
-                if (this.state.expressions.length === 0) {
-                    this.state.plotOn = false
+                this.resetAxis(this.chart.expressions[index].axis)
+                this.chart.expressions.splice(index, 1)
+                if (this.chart.expressions.length === 0) {
+                    // this.state.plotOn = false
                 }
                 this.onRangeChanged()
             } else {
                 this.addPlots([[fieldname, axis, color]])
             }
-            console.log(this.state.expressions)
+            console.log(this.chart.expressions)
             // if (silent !== true) {
             //     this.plot()
             //     this.state.plotLoading = false
@@ -581,7 +586,7 @@ export default {
         calculateXAxisDomain () {
             let start = 0.02
             let end = 0.98
-            for (const field of this.state.expressions) {
+            for (const field of this.chart.expressions) {
                 if (field.axis === 0) {
                     start = Math.max(start, 0.03)
                 } else if (field.axis === 1) {
@@ -600,7 +605,7 @@ export default {
         },
         getAxisTitle (fieldAxis) {
             const names = []
-            for (const field of this.state.expressions) {
+            for (const field of this.chart.expressions) {
                 if (field.axis === fieldAxis) {
                     names.push(field.name)
                 }
@@ -751,7 +756,10 @@ export default {
         cleanupCache () {
             const keys = Object.keys(this.state.plotCache)
             for (const key of keys) {
-                if (this.state.expressions.map(e => e.name).indexOf(key) < 0) {
+                const isExpressionInAnyChart = this.state.charts.some(chart =>
+                    chart.expressions.some(e => e.name === key)
+                )
+                if (!isExpressionInAnyChart) {
                     delete this.state.plotCache[key]
                 }
             }
@@ -779,7 +787,7 @@ export default {
         },
         plot () {
             console.log('plot()')
-            if (this.state.expressions.length === 0) {
+            if (this.chart.expressions.length === 0) {
                 console.log('no expressions to plot')
                 return
             }
@@ -789,18 +797,19 @@ export default {
             this.state.expressionErrors = []
             const errors = []
 
-            for (const expression of this.state.expressions) {
+            for (const expression of this.chart.expressions) {
                 const [canplot, error] = this.expressionCanBePlotted(expression, false)
                 if (!canplot) {
                     errors.push(error)
-                    this.state.expressionErrors = errors
+                    this.chart.expressionErrors = errors
                     return
                 }
                 errors.push(null)
             }
+            this.chart.expressionErrors = errors
 
             let messages = []
-            for (const expression of this.state.expressions) {
+            for (const expression of this.chart.expressions) {
                 messages = [...messages, ...(this.findMessagesInExpression(expression.name).map(message => message[0]))]
             }
             if (!this.messagesAreAvailable(messages)) {
@@ -811,13 +820,13 @@ export default {
                     })
             }
 
-            for (const expression of this.state.expressions) {
+            for (const expression of this.chart.expressions) {
                 let data = this.evaluateExpression(expression.name)
                 if ('error' in data) {
-                    this.state.expressionErrors.push(data.error)
+                    this.chart.expressionErrors.push(data.error)
                     data = { x: 0, y: 0 }
                 } else {
-                    this.state.expressionErrors.push(null)
+                    this.chart.expressionErrors.push(null)
                 }
                 console.log(data)
                 const mode = data.isSwissCheese ? 'lines+markers' : 'lines'
@@ -1114,6 +1123,9 @@ export default {
         }
     },
     computed: {
+        chart () {
+            return this.state.charts[this.chartIndex]
+        },
         setOfModes () {
             const set = []
             for (const mode of this.state.flightModeChanges) {
@@ -1130,7 +1142,7 @@ export default {
             return undefined
         },
         expressions () {
-            return this.state.expressions
+            return this.chart.expressions
         },
         messagesInLog () {
             return Object.keys(this.state.messageTypes)

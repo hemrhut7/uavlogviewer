@@ -24,9 +24,10 @@
 
                 <div class="row"
                      v-bind:class="[state.showMap ? 'h-50' : 'h-100']"
-                     v-if="state.plotOn">
-                    <div class="col-12">
-                        <Plotly/>
+                     v-if="state.plotOn"
+                     style="overflow-y: auto; display: block;">
+                    <div class="col-12" v-for="(chart, index) in state.charts" :key="'chart' + index">
+                        <Plotly :chartIndex="index"/>
                     </div>
                 </div>
                 <div class="row" v-bind:class="[state.plotOn ? 'h-50' : 'h-100']"

@@ -93,6 +93,7 @@ export class MavlinkParser {
         instance = this
         instance.forcedTimeOffset = 0
         instance.lastTime = 0
+        instance.isDoneLoading = false
     }
 
     static fixData (message) {
@@ -119,64 +120,84 @@ export class MavlinkParser {
     }
 
     onMessage (messages) {
-        const name = messages[0]._name
+        if (!messages || messages.length === 0) return
+
+        // Group messages by srcSystem
+        const groupedBySysId = {}
         for (const message of messages) {
-            if (instance.totalSize == null) { // for percentage calculation
-                instance.totalSize = this.buf.byteLength
+            const sysid = (message.header && message.header.srcSystem) ? message.header.srcSystem : 1
+            if (!groupedBySysId[sysid]) {
+                groupedBySysId[sysid] = []
             }
-            if (message._id !== -1) {
-                // if (message.time_boot_ms === undefined) {
-                //     message.time_boot_ms = instance.lastTime
-                // }
-                //
-                // // TODO: Fix this logic, it is probably wrong.
-                // if ((+message.time_boot_ms + instance.forcedTimeOffset) < instance.lastTime) {
-                //     console.log(
-                //     'Time going backwards detected, adding an offset.This means SYSTEM_TIME is now out of sync!')
-                //     instance.forcedTimeOffset = +instance.lastTime - message.time_boot_ms + 100000
-                // }
+            groupedBySysId[sysid].push(message)
+        }
 
-                if (+message.time_boot_ms < instance.lastTime) {
-                    // eslint-disable-next-line
-                    message.time_boot_ms = +message.time_boot_ms + instance.forcedTimeOffset
+        for (const sysid in groupedBySysId) {
+            const sysMessages = groupedBySysId[sysid]
+            const name = sysMessages[0]._name
+            const fullName = `${name}[${sysid}]`
+
+            for (const message of sysMessages) {
+                if (instance.totalSize == null) { // for percentage calculation
+                    instance.totalSize = this.buf.byteLength
                 }
-                instance.lastTime = +message.time_boot_ms
+                if (message._id !== -1) {
+                    if (+message.time_boot_ms < instance.lastTime) {
+                        // eslint-disable-next-line
+                        message.time_boot_ms = +message.time_boot_ms + instance.forcedTimeOffset
+                    }
+                    instance.lastTime = +message.time_boot_ms
 
-                if (message.name in instance.messages) {
                     MavlinkParser.fixData(message)
-                } else {
-                    instance.messages[message._name] = [MavlinkParser.fixData(message)]
+
+                    // if (fullName in instance.messages) {
+                    //    // Handled below by mergedData
+                    // }
                 }
-                // TODO: FIX THIS!
-                // This a hack to detect the end of the buffer and only them message the main thread
-                if (this.buf.length < 100 && instance.sent === false) {
-                    instance.sent = true
+            }
+
+            const fields = sysMessages[0].fieldnames
+            if (fields.indexOf('time_boot_ms') === -1) {
+                fields.push('time_boot_ms')
+            }
+            if (sysMessages[0]._name === 'HEARTBEAT') {
+                fields.push('asText')
+                fields.push('craft')
+            } else if (sysMessages[0]._name === 'SYSTEM_TIME') {
+                fields.push('time_unix_usec')
+            }
+            const mergedData = {}
+            for (const field of fields) {
+                mergedData[field] = []
+            }
+            for (const message of sysMessages) {
+                for (let i = 0; i < fields.length; i++) {
+                    const fieldname = fields[i]
+                    mergedData[fieldname].push(message[fieldname])
                 }
+            }
+
+            instance.messages[fullName] = mergedData
+
+            // Update availableMessages if we find a new fullName
+            if (instance.availableMessages && !(fullName in instance.availableMessages)) {
+                const baseType = name
+                if (instance.availableMessages[baseType]) {
+                    instance.availableMessages[fullName] = JSON.parse(JSON.stringify(instance.availableMessages[baseType]))
+                    self.postMessage({ availableMessages: instance.availableMessages })
+                }
+            }
+
+            // For backward compatibility, also store in the non-suffixed name if it's the first one we see
+            // or if it's sysID 1 (usually the primary)
+            if (!(name in instance.messages) || Number(sysid) === 1) {
+                instance.messages[name] = mergedData
             }
         }
 
-        const fields = messages[0].fieldnames
-        if (fields.indexOf('time_boot_ms') === -1) {
-            fields.push('time_boot_ms')
+        if (instance.isDoneLoading) {
+            self.postMessage({ messages: instance.messages })
         }
-        if (messages[0]._name === 'HEARTBEAT') {
-            fields.push('asText')
-            fields.push('craft')
-        } else if (messages[0]._name === 'SYSTEM_TIME') {
-            fields.push('time_unix_usec')
-        }
-        const mergedData = {}
-        for (const field of fields) {
-            mergedData[field] = []
-        }
-        for (const message of messages) {
-            for (let i = 0; i < fields.length; i++) {
-                const fieldname = fields[i]
-                mergedData[fieldname].push(message[fieldname])
-            }
-        }
-        instance.messages[name] = mergedData
-        self.postMessage({ messages: instance.messages })
     }
 
     extractStartTime () {
@@ -186,23 +207,7 @@ export class MavlinkParser {
     processData (data) {
         this.mavlinkParser.pushBuffer(Buffer.from(data))
         const availableMessages = this.mavlinkParser.preParse()
-        const preparseList = [
-            'SYSTEM_TIME',
-            'GLOBAL_POSITION_INT',
-            'GPS_RAW_INT',
-            'HEARTBEAT',
-            'ATTITUDE',
-            'AHRS',
-            'PARAM_VALUE',
-            'STATUSTEXT',
-            'AHRS2',
-            'AHRS3',
-            'NAMED_VALUE_FLOAT',]
-        for (const i in preparseList) {
-            this.mavlinkParser.parseType(preparseList[i])
-            self.postMessage({ percentage: (i / preparseList.length) * 100 })
-        }
-        self.postMessage({ percentage: 100 })
+
         const messageTypes = {}
         for (const msg of availableMessages) {
             let fields = mavlink.messageFields[msg]
@@ -222,12 +227,37 @@ export class MavlinkParser {
                 complexFields: complexFields
             }
         }
+        instance.availableMessages = messageTypes
+
+        const preparseList = [
+            'SYSTEM_TIME',
+            'GLOBAL_POSITION_INT',
+            'GPS_RAW_INT',
+            'HEARTBEAT',
+            'ATTITUDE',
+            'AHRS',
+            'PARAM_VALUE',
+            'STATUSTEXT',
+            'AHRS2',
+            'AHRS3',
+            'NAMED_VALUE_FLOAT',]
+
+        instance.isDoneLoading = false
+        for (const i in preparseList) {
+            this.mavlinkParser.parseType(preparseList[i])
+            self.postMessage({ percentage: (i / preparseList.length) * 100 })
+        }
+        self.postMessage({ percentage: 100 })
+
         const metadata = {
             startTime: this.extractStartTime()
         }
 
         self.postMessage({ metadata: metadata })
-        self.postMessage({ availableMessages: messageTypes })
+
+        instance.isDoneLoading = true
+        self.postMessage({ availableMessages: instance.availableMessages })
+        self.postMessage({ messages: instance.messages })
         self.postMessage({ messagesDoneLoading: true })
         // self.postMessage({done: true})
         return { types: messageTypes, messages: instance.messages }
