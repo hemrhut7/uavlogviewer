@@ -39,21 +39,34 @@
                 </li>
                 <b-collapse :id="'type' + key" v-bind:key="key+'1'">
                     <template v-for="item in messageTypes[key].complexFields">
-                        <li @click="toggle(key, item.name)"
+                        <li @click="toggle(key, item.name, 0)"
                             class="field"
                             :title="messageDocs[key] ? messageDocs[key][item.name] : ''"
                             v-bind:key="key+'.'+item.name"
                             v-if="isPlottable(key,item.name)
                                 && item.name.toLowerCase().indexOf(filter.toLowerCase()) !== -1">
-                            <a> {{item.name}}
-                                <span v-if="item.units!=='?' && item.units!==''"> ({{item.units}})</span>
-                            </a>
-                            <span class="description">
-                              {{ messageDocs[key] ? messageDocs[key][item.name.split('[')[0]] : '' }}
-                            </span>
+                            <div class="field-content">
+                                <a> {{item.name}}
+                                    <span v-if="item.units!=='?' && item.units!==''"> ({{item.units}})</span>
+                                </a>
+                                <span class="description">
+                                  {{ messageDocs[key] ? messageDocs[key][item.name.split('[')[0]] : '' }}
+                                </span>
+                            </div>
 
-                            <a @click="$eventHub.$emit('togglePlot', field.name)" v-if="isPlotted(key,item.name)">
-                                <i class="remove-icon fas fa-trash" title="Remove data"></i>
+                            <div class="chart-indicators" v-if="state.charts.length > 1">
+                                <span v-for="(chart, idx) in state.charts"
+                                      :key="'chart-btn-' + idx"
+                                      class="chart-btn"
+                                      :class="{ active: isPlottedInChart(key, item.name, idx) }"
+                                      @click.stop="toggle(key, item.name, idx)"
+                                      :title="'Toggle on Chart ' + (idx + 1)">
+                                    {{ idx + 1 }}
+                                </span>
+                            </div>
+
+                            <a @click.stop="toggle(key, item.name)" v-if="isPlotted(key,item.name)" class="remove-container">
+                                <i class="remove-icon fas fa-trash" title="Remove from all charts"></i>
                             </a>
                         </li>
                     </template>
@@ -217,12 +230,15 @@ export default {
         },
         isPlotted (message, field) {
             const fullname = message + '.' + field
-            for (const field of this.state.expressions) {
-                if (field.name === fullname) {
-                    return true
-                }
-            }
-            return false
+            return this.state.charts.some(chart =>
+                chart.expressions.some(e => e.name === fullname)
+            )
+        },
+        isPlottedInChart (message, field, chartIdx) {
+            const fullname = message + '.' + field
+            const chart = this.state.charts[chartIdx]
+            if (!chart) return false
+            return chart.expressions.some(e => e.name === fullname)
         },
         getMessageNumericField (message) {
             const numberFields = []
@@ -235,10 +251,10 @@ export default {
             }
             return numberFields
         },
-        toggle (message, item) {
+        toggle (message, item, chartIdx) {
             this.state.plotOn = true
             this.$nextTick(function () {
-                this.$eventHub.$emit('togglePlot', message + '.' + item)
+                this.$eventHub.$emit('togglePlot', message + '.' + item, undefined, undefined, chartIdx)
             })
         },
         isPlottable (msgtype, item) {
@@ -426,8 +442,61 @@ export default {
     ::-ms-input-placeholder { /* Microsoft Edge */
         color: #2e2e2e;
     }
+    li.field {
+        padding: 4px 5px 4px 10px;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .field-content {
+        flex-grow: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
     i.remove-icon {
-        float: right;
+        margin-left: 10px;
+    }
+    .remove-container {
+        display: flex;
+        align-items: center;
+    }
+
+    .chart-indicators {
+        display: flex;
+        gap: 4px;
+        margin-left: 5px;
+        flex-shrink: 0;
+    }
+
+    .chart-btn {
+        display: inline-block;
+        width: 18px;
+        height: 18px;
+        line-height: 16px;
+        text-align: center;
+        border: 1px solid #777;
+        border-radius: 3px;
+        font-size: 11px;
+        cursor: pointer;
+        background: #3a3a3a;
+        color: #fff;
+        font-weight: bold;
+        transition: all 0.2s;
+    }
+
+    .chart-btn:hover {
+        background: #555;
+        border-color: #999;
+    }
+
+    .chart-btn.active {
+        background: #2196F3;
+        color: white;
+        border-color: #4dabf5;
+        box-shadow: 0 0 8px rgba(33, 150, 243, 0.6);
     }
 
     @media (min-width: 575px) and (max-width: 992px) {

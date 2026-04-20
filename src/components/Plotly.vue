@@ -207,10 +207,14 @@ export default {
     },
     beforeDestroy () {
         this.$eventHub.$off('animation-changed')
-        this.$eventHub.$off('cesium-time-changed')
-        this.$eventHub.$off('addPlots')
-        this.$eventHub.$off('hidePlot')
-        this.$eventHub.$off('togglePlot')
+        this.$eventHub.$off('cesium-time-changed', this.setCursorTime)
+        this.$eventHub.$off('hoveredTime', this.setCursorTime)
+        this.$eventHub.$off('force-resize-plotly', this.resize)
+        this.$eventHub.$off('child-zoomed', this.onTimeRangeChanged)
+        this.$eventHub.$off('addPlots', this.addPlots)
+        this.$eventHub.$off('plot', this.plot)
+        this.$eventHub.$off('clearPlot', this.clearPlot)
+        this.$eventHub.$off('togglePlot', this.togglePlot)
         clearInterval(this.interval)
     },
     props: {
@@ -487,7 +491,10 @@ export default {
             }
         },
 
-        addPlots (plots) {
+        addPlots (plots, targetChartIndex) {
+            if (targetChartIndex !== undefined && targetChartIndex !== this.chartIndex) {
+                return
+            }
             this.state.plotLoading = true
             const requested = new Set()
             const RE = /[A-Z][A-Z0-9_]+(\[[0-9]\])?\.[a-zA-Z0-9]+/g
@@ -513,7 +520,7 @@ export default {
             if ([...requested].length > 0) {
                 console.log([...requested])
                 this.waitForMessages([...requested]).then(() => {
-                    this.addPlots(plots)
+                    this.addPlots(plots, targetChartIndex)
                 })
                     .catch((e) => {
                         alert(e)
@@ -560,7 +567,10 @@ export default {
             obj[key].autorange = true
             Plotly.relayout(this.gd, obj)
         },
-        togglePlot (fieldname, axis, color, silent) {
+        togglePlot (fieldname, axis, color, targetChartIndex) {
+            if (targetChartIndex !== undefined && targetChartIndex !== this.chartIndex) {
+                return
+            }
             if (this.isPlotted((fieldname))) {
                 let index
                 for (const i in this.chart.expressions) {
@@ -575,7 +585,7 @@ export default {
                 }
                 this.onRangeChanged()
             } else {
-                this.addPlots([[fieldname, axis, color]])
+                this.addPlots([[fieldname, axis, color]], targetChartIndex)
             }
             console.log(this.chart.expressions)
             // if (silent !== true) {
