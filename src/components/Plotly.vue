@@ -813,10 +813,10 @@ Std: ${std.toFixed(2)}`
                 console.log('no expressions to plot')
                 return
             }
-            plotOptions.title = this.state.file
+            const currentOptions = JSON.parse(JSON.stringify(plotOptions))
+            currentOptions.title = this.state.file
             const _this = this
             const datasets = []
-            this.state.expressionErrors = []
             const errors = []
 
             for (const expression of this.chart.expressions) {
@@ -884,15 +884,15 @@ Std: ${std.toFixed(2)}`
                 const axisname = expression.axis > 0 ? ('yaxis' + (expression.axis + 1)) : 'yaxis'
 
                 if (expression.axis <= 6) {
-                    plotOptions[axisname].title = {
+                    currentOptions[axisname].title = {
                         text: this.getAxisTitle(expression.axis),
                         font: {
                             color: expression.color
                         }
                     }
-                    plotOptions[axisname].tickfont.color = expression.color
+                    currentOptions[axisname].tickfont.color = expression.color
                     /* if (this.state.messageTypes[msgtype].complexFields[msgfield].units !== '?') {
-                         plotOptions[axisname].title.text +=
+                         currentOptions[axisname].title.text +=
                             ' (' + this.state.messageTypes[msgtype].complexFields[msgfield].units + ')'
                     } */
                 }
@@ -902,20 +902,20 @@ Std: ${std.toFixed(2)}`
 
             const plotData = datasets
 
-            plotOptions.xaxis = {
+            currentOptions.xaxis = {
                 rangeslider: {},
                 domain: this.calculateXAxisDomain(),
                 title: 'time_boot (ms)',
                 tickformat: ':04,2f'
             }
             if (this.plotInstance !== null) {
-                plotOptions.xaxis.range = this.gd._fullLayout.xaxis.range
-                Plotly.newPlot(this.gd, plotData, plotOptions, { scrollZoom: true, responsive: true })
+                currentOptions.xaxis.range = this.gd._fullLayout.xaxis.range
+                Plotly.newPlot(this.gd, plotData, currentOptions, { scrollZoom: true, responsive: true })
             } else {
                 this.plotInstance = Plotly.newPlot(
                     this.gd,
                     plotData,
-                    plotOptions,
+                    currentOptions,
                     {
                         modeBarButtonsToAdd: [this.csvButton(), this.popupButton()],
                         scrollZoom: true,
@@ -1175,22 +1175,31 @@ Std: ${std.toFixed(2)}`
             if (!this.state.syncZoom) {
                 return range
             }
+
+            // Check if range is already set to avoid unnecessary relayout
+            if (this.gd && this.gd.layout && this.gd.layout.xaxis && this.gd.layout.xaxis.range) {
+                const currentRange = this.gd.layout.xaxis.range
+                if (range &&
+                    Math.abs(currentRange[0] - range[0]) < 0.001 &&
+                    Math.abs(currentRange[1] - range[1]) < 0.001) {
+                    return range
+                }
+            }
+
             if (this.zoomInterval !== null) {
                 clearTimeout(this.zoomInterval)
             }
             this.updatChildrenTimeRange(this.state.timeRange)
             this.zoomInterval = setTimeout(() => {
-                Plotly.relayout(this.gd, {
-                    xaxis: {
-                        title: 'Time since boot',
-                        range: range,
-                        domain: this.calculateXAxisDomain(),
-                        rangeslider: {},
-                        tickformat: timeformat
-                    }
-                })
+                // Use property paths to avoid resetting other xaxis properties (like rangeslider state)
+                // which might be causing issues with image saving/exporting.
+                const update = {
+                    'xaxis.range': range,
+                    'xaxis.domain': this.calculateXAxisDomain()
+                }
+                Plotly.relayout(this.gd, update)
             }, 500)
-            return range // make linter happy, it says this is a computed property(?)
+            return range
         },
         expressions: {
             deep: true,

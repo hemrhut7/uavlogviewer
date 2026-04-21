@@ -471,6 +471,7 @@ export default {
         gap: 4px;
         margin-left: 5px;
         flex-shrink: 0;
+        width: auto !important;
     }
 
     .chart-btn {
