@@ -35,6 +35,8 @@ export const store = {
     mapLoading: false,
     plotLoading: false,
     timeRange: null,
+    syncZoom: true,
+    statsFullRange: true,
     textMessages: [],
     namedFloats: [],
     metadata: null,

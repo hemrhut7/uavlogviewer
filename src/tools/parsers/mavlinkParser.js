@@ -79,6 +79,9 @@ function getModeString (mavtype, cmode, basemode) {
 }
 
 const rad2deg = 180 / Math.PI
+const normalizeAngle = (angle) => {
+    return ((angle + 180) % 360 + 360) % 360 - 180
+}
 let instance
 
 export class MavlinkParser {
@@ -105,22 +108,22 @@ export class MavlinkParser {
             message.relative_alt = message.relative_alt / 1000
             return message
         } else if (message._name === 'ATTITUDE') {
-            message.roll = message.roll * rad2deg
-            message.pitch = message.pitch * rad2deg
-            message.yaw = message.yaw * rad2deg
+            message.roll = normalizeAngle(message.roll * rad2deg)
+            message.pitch = normalizeAngle(message.pitch * rad2deg)
+            message.yaw = normalizeAngle(message.yaw * rad2deg)
             message.rollspeed = message.rollspeed * rad2deg
             message.pitchspeed = message.pitchspeed * rad2deg
             message.yawspeed = message.yawspeed * rad2deg
             return message
         } else if (message._name === 'AHRS2' || message._name === 'AHRS3') {
-            message.roll = message.roll * rad2deg
-            message.pitch = message.pitch * rad2deg
-            message.yaw = message.yaw * rad2deg
+            message.roll = normalizeAngle(message.roll * rad2deg)
+            message.pitch = normalizeAngle(message.pitch * rad2deg)
+            message.yaw = normalizeAngle(message.yaw * rad2deg)
             return message
         } else if (message._name === 'SIMSTATE') {
-            message.roll = message.roll * rad2deg
-            message.pitch = message.pitch * rad2deg
-            message.yaw = message.yaw * rad2deg
+            message.roll = normalizeAngle(message.roll * rad2deg)
+            message.pitch = normalizeAngle(message.pitch * rad2deg)
+            message.yaw = normalizeAngle(message.yaw * rad2deg)
             message.xgyro = message.xgyro * rad2deg
             message.ygyro = message.ygyro * rad2deg
             message.zgyro = message.zgyro * rad2deg

@@ -65,7 +65,8 @@
                                 </span>
                             </div>
 
-                            <a @click.stop="toggle(key, item.name)" v-if="isPlotted(key,item.name)" class="remove-container">
+                            <a @click.stop="toggle(key, item.name)"
+                               v-if="isPlotted(key,item.name)" class="remove-container">
                                 <i class="remove-icon fas fa-trash" title="Remove from all charts"></i>
                             </a>
                         </li>
@@ -452,6 +453,7 @@ export default {
     }
     .field-content {
         flex-grow: 1;
+        width: auto !important;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;

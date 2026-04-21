@@ -48,18 +48,31 @@
         </div>
       </div>
       <!-- GLOBAL BUTTONS -->
-      <div class="btns-wrapper global-btns">
-        <button class="add-chart" @click="createNewChart">
-           <i class="fa fa-plus-square" aria-hidden="true"></i>Add New Chart
-        </button>
-        <button v-if="state.charts.some(c => c.expressions.length > 0)"
-                class="save-preset" v-b-modal.modal-prevent-closing>
-          <i class="fa fa-check-circle" aria-hidden="true"></i>Save Preset
-        </button>
-        <button class="save-preset" v-if="state.charts.some(c => c.expressions.length > 0)" @click="clearAllPlots">
-          <i class="fa fa-ban" aria-hidden="true"></i>
-          clear all
-        </button>
+      <div class="btns-wrapper global-btns"
+           style="flex-direction: column; align-items: center; gap: 10px;">
+        <div class="global-settings" style="display: flex; gap: 15px; color: #fff;">
+          <label style="cursor: pointer;">
+            <input type="checkbox" v-model="state.syncZoom"> Sync Zoom
+          </label>
+          <label style="cursor: pointer;">
+            <input type="checkbox" v-model="state.statsFullRange"
+                   @change="$eventHub.$emit('recalc-stats')"> Full Range Stats
+          </label>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button class="add-chart" @click="createNewChart">
+             <i class="fa fa-plus-square" aria-hidden="true"></i>Add New Chart
+          </button>
+          <button v-if="state.charts.some(c => c.expressions.length > 0)"
+                  class="save-preset" v-b-modal.modal-prevent-closing>
+            <i class="fa fa-check-circle" aria-hidden="true"></i>Save Preset
+          </button>
+          <button class="save-preset" v-if="state.charts.some(c => c.expressions.length > 0)"
+                  @click="clearAllPlots">
+            <i class="fa fa-ban" aria-hidden="true"></i>
+            clear all
+          </button>
+        </div>
       </div>
     </b-collapse>
     <!-- MODAL -->
