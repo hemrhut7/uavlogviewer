@@ -125,12 +125,27 @@ export default {
         this.trajectory = null // GPS trajectory (in degrees)
         this.correctedTrajectory = [] // GPS trajectory (Cartographic array)
 
+        this.lastConnectionMode = this.state.mapConnectionMode
         // Link time with plot updates
         this.$eventHub.$on('hoveredTime', this.showAttitude)
         // This fires up the loading spinner
         this.state.mapLoading = true
+
+        this.$watch('state.mapConnectionMode', () => {
+            console.log('Map connection mode changed, re-initializing...')
+            this.asyncSetup()
+        })
+
+        this.onNetworkChange = () => {
+            console.log('Network status changed:', navigator.onLine)
+            this.state.mapConnectionMode = navigator.onLine ? 'online' : 'offline'
+        }
+        window.addEventListener('online', this.onNetworkChange)
+        window.addEventListener('offline', this.onNetworkChange)
     },
     beforeDestroy () {
+        window.removeEventListener('online', this.onNetworkChange)
+        window.removeEventListener('offline', this.onNetworkChange)
         this.$eventHub.$off('hoveredTime')
     },
     mounted () {
@@ -139,8 +154,19 @@ export default {
     },
     methods: {
         async asyncSetup () {
-            if (this.viewer == null) {
-                this.viewer = this.createViewer(false)
+            if (this.viewer == null || (this.lastConnectionMode !== this.state.mapConnectionMode)) {
+                if (this.viewer) {
+                    this.viewer.destroy()
+                    this.viewer = null
+                    // Clear reference to old toolbar buttons etc
+                    const toolbar = document.getElementsByClassName('cesium-viewer-toolbar')[0]
+                    if (toolbar) {
+                        toolbar.innerHTML = ''
+                    }
+                }
+                this.lastConnectionMode = this.state.mapConnectionMode
+                const isOnline = this.state.mapConnectionMode === 'online'
+                this.viewer = this.createViewer(isOnline)
                 this.viewer.scene.debugShowFramesPerSecond = true
 
                 this.viewer.scene.postProcessStages.ambientOcclusion.enabled = false
@@ -239,6 +265,16 @@ export default {
             if (online) {
                 console.log('creating online viewer')
                 const imageryProviders = this.createAdditionalProviders()
+                let baseLayerProvider
+                if (Ion.defaultAccessToken && Ion.defaultAccessToken.length > 30) {
+                    baseLayerProvider = IonImageryProvider.fromAssetId(3954)
+                } else {
+                    baseLayerProvider = new UrlTemplateImageryProvider({
+                        url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        credit: 'Map tiles by OpenStreetMap.'
+                    })
+                }
+
                 return new Viewer(
                     'cesiumContainer',
                     {
@@ -252,8 +288,9 @@ export default {
                         shadows: true,
                         // eslint-disable-next-line
                         baseLayer: new ImageryLayer.fromProviderAsync(
-                            IonImageryProvider.fromAssetId(3954)
+                            baseLayerProvider
                         ),
+                        baseLayerPicker: true,
                         imageryProviderViewModels: imageryProviders,
                         orderIndependentTranslucency: false,
                         useBrowserRecommendedResolution: false

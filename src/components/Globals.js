@@ -22,6 +22,7 @@ export const store = {
     cssColors: [],
     colors: [],
     mapAvailable: false,
+    mapConnectionMode: (typeof navigator !== 'undefined' && navigator.onLine) ? 'online' : 'offline',
     mission: [],
     fences: [],
     showFences: true,
