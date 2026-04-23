@@ -78,7 +78,7 @@ window.mag_heading = function (RAW_IMU, ATTITUDE, declination, SENSOR_OFFSETS, o
     const headY = magY * dcmMatrix.e(8) - magZ * dcmMatrix.e(7)
     const headX = magX * cosPitchSqr - dcmMatrix.e(6) * (magY * dcmMatrix.e(7) + magZ * dcmMatrix.e(8))
     const heading = window.degrees(Math.atan2(-headY, headX)) + declination
-    return (heading % 360 + 360) % 360
+    return ((heading + 180) % 360 + 360) % 360 - 180
 }
 
 window.mag_heading_df = function (MAG, ATT, declination, SENSOR_OFFSETS, ofs) {
@@ -105,7 +105,7 @@ window.mag_heading_df = function (MAG, ATT, declination, SENSOR_OFFSETS, ofs) {
     const headY = magY * dcmMatrix.e(8) - magZ * dcmMatrix.e(7)
     const headX = magX * cosPitchSqr - dcmMatrix.e(6) * (magY * dcmMatrix.e(7) + magZ * dcmMatrix.e(8))
     const heading = window.degrees(Math.atan2(-headY, headX)) + declination
-    return (heading % 360 + 360) % 360
+    return ((heading + 180) % 360 + 360) % 360 - 180
 }
 
 window.mag_field = function (RAW_IMU, SENSOR_OFFSETS, ofs) {

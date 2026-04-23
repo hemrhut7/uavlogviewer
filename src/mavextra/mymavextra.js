@@ -27,7 +27,7 @@ window.wrap_360 = (angle) => {
 
 // eslint-disable-next-line camelcase
 window.wrap_180 = (angle) => {
-    return (angle % 360 + 360) % 360
+    return ((angle + 180) % 360 + 360) % 360 - 180
 }
 
 window.min = Math.min
