@@ -66,7 +66,7 @@
                             </div>
 
                             <a @click.stop="toggle(key, item.name)"
-                               v-if="isPlotted(key,item.name)" class="remove-container">
+                               v-if="state.charts.length === 1 && isPlotted(key, item.name)" class="remove-container">
                                 <i class="remove-icon fas fa-trash" title="Remove from all charts"></i>
                             </a>
                         </li>
@@ -444,7 +444,7 @@ export default {
         color: #2e2e2e;
     }
     li.field {
-        padding: 4px 5px 4px 10px;
+        padding: 4px 5px 4px 30px;
         cursor: pointer;
         display: flex;
         justify-content: space-between;

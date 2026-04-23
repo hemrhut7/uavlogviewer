@@ -80,8 +80,9 @@ function getModeString (mavtype, cmode, basemode) {
 
 const rad2deg = 180 / Math.PI
 const normalizeAngle = (angle) => {
-    return ((angle + 180) % 360 + 360) % 360 - 180
+    return (angle % 360 + 360) % 360
 }
+
 let instance
 
 export class MavlinkParser {

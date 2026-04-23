@@ -45,7 +45,12 @@
           <button class="add-expression" @click="createNewExpression(chartIdx)">
             <i class="fa fa-plus" aria-hidden="true"></i>Add to Chart {{ chartIdx + 1 }}
           </button>
+          <button class="clear-all" v-if="chart.expressions.length > 0"
+                  @click="clearChart(chartIdx)">
+            <i class="fa fa-ban" aria-hidden="true"></i>Clear Chart
+          </button>
         </div>
+
       </div>
       <!-- GLOBAL BUTTONS -->
       <div class="btns-wrapper global-btns"
@@ -59,7 +64,7 @@
                    @change="$eventHub.$emit('recalc-stats')"> Full Range Stats
           </label>
         </div>
-        <div style="display: flex; gap: 10px;">
+        <div class="global-action-btns">
           <button class="add-chart" @click="createNewChart">
              <i class="fa fa-plus-square" aria-hidden="true"></i>Add New Chart
           </button>
@@ -67,12 +72,8 @@
                   class="save-preset" v-b-modal.modal-prevent-closing>
             <i class="fa fa-check-circle" aria-hidden="true"></i>Save Preset
           </button>
-          <button class="save-preset" v-if="state.charts.some(c => c.expressions.length > 0)"
-                  @click="clearAllPlots">
-            <i class="fa fa-ban" aria-hidden="true"></i>
-            clear all
-          </button>
         </div>
+
       </div>
     </b-collapse>
     <!-- MODAL -->
@@ -166,12 +167,18 @@ export default {
                 chart.expressions.splice(index, 1)
             }
         },
+        clearChart (index) {
+            const chart = this.state.charts[index]
+            chart.expressions = []
+            chart.expressionErrors = []
+        },
         clearAllPlots () {
             this.state.charts.forEach(chart => {
                 chart.expressions = []
                 chart.expressionErrors = []
             })
         },
+
         savePreset (name) {
             const myStorage = window.localStorage
             const saved = JSON.parse(myStorage.getItem('savedFields')) || {}
@@ -310,9 +317,12 @@ select option:hover {
   background-color: rgb(33, 41, 61);
   color: #fff;
   border-radius: 15px;
-  padding: 0px 10px 0px 0px;
+  padding: 5px 15px 5px 10px;
   border: 1px solid rgba(91, 100, 117, 0.76);
   font-size: 13px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
 }
 
 .save-preset:hover {
@@ -331,9 +341,12 @@ select option:hover {
   background-color: rgb(33, 41, 61);
   color: #fff;
   border-radius: 15px;
-  padding: 0px 10px 0px 0px;
+  padding: 5px 15px 5px 10px;
   border: 1px solid rgba(91, 100, 117, 0.76);
   font-size: 13px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
 }
 
 .add-expression:hover {
@@ -392,16 +405,44 @@ select option:hover {
 }
 
 .add-chart {
-  background-color: #2d3a57;
+  background-color: rgb(33, 41, 61);
   color: #fff;
   border-radius: 15px;
   padding: 5px 15px;
   border: 1px solid #5b6475;
   font-size: 13px;
-  margin-bottom: 5px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+}
+
+.clear-all {
+  background-color: rgb(33, 41, 61);
+  color: #fff;
+  border-radius: 15px;
+  padding: 5px 15px 5px 10px;
+  border: 1px solid #5b6475;
+  font-size: 13px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+}
+
+.clear-all:hover {
+  background-color: rgb(33, 41, 61);
+  box-shadow: 0px 0px 12px 0px rgba(133, 37, 37, 0.55);
+  transition: all 0.5s ease;
 }
 
 .add-chart:hover {
   background-color: #3e4e73;
+}
+
+.global-action-btns {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
 }
 </style>
