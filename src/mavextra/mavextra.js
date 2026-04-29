@@ -12,6 +12,14 @@ window.radians = function (a) {
     return 0.0174533 * a
 }
 
+window.constrain_angle = function (a) {
+    return ((a + 180) % 360 + 360) % 360 - 180
+}
+
+window.constrain_angle_180 = function (a) {
+    return ((a + 180) % 360 + 360) % 360 - 180
+}
+
 // convert m/s to Km/h
 window.kmh = function (mps) {
     return mps * 3.6

@@ -206,7 +206,7 @@ export default {
             }
         },
         addMaxMinMeanToTitles   () {
-            const average = arr => arr.reduce((p, c) => p + c, 0) / arr.length
+            const average = arr => arr.length > 0 ? arr.reduce((p, c) => p + c, 0) / arr.length : 0
             const gd = this.gd
             const xRange = gd.layout.xaxis.range
 
@@ -214,18 +214,18 @@ export default {
 
             gd.data.forEach(trace => {
                 const len = Math.min(trace.x.length, trace.y.length)
-                const xInside = []
                 const yInside = []
 
                 for (let i = 0; i < len; i++) {
                     const x = trace.x[i]
                     const y = trace.y[i]
 
-                    if (x > xRange[0] && x < xRange[1]) {
-                        xInside.push(x)
+                    if (x > xRange[0] && x < xRange[1] && y !== null && !isNaN(y)) {
                         yInside.push(y)
                     }
                 }
+
+                if (yInside.length === 0) return
                 const extraData = ` | Min: ${Math.min(...yInside).toFixed(2)} \
     Max: ${Math.max(...yInside).toFixed(2)} \
     Mean: ${average(yInside).toFixed(2)}`

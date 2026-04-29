@@ -11,27 +11,30 @@ export default class ColorCoderPlot {
   }
 
   computeStats (arr) {
-      const n = arr.length
-      if (n === 0) return { min: null, max: null, avg: null, std: null }
+      if (arr.length === 0) return { min: null, max: null, avg: null, std: null }
 
       let min = Infinity
       let max = -Infinity
       let sum = 0
       let sumOfSquares = 0
+      let validCount = 0
 
-      for (let i = 0; i < n; i++) {
+      for (let i = 0; i < arr.length; i++) {
           const value = arr[i]
-          if (!value) continue
+          if (value === null || isNaN(value)) continue
           if (value < min) min = value
           if (value > max) max = value
           sum += value
           sumOfSquares += value * value
+          validCount++
       }
 
-      const avg = sum / n
-      // Calculate variance as: (sumOfSquares/n) - avg^2
+      if (validCount === 0) return { min: null, max: null, avg: null, std: null }
+
+      const avg = sum / validCount
+      // Calculate variance as: (sumOfSquares/validCount) - avg^2
       // Then, standard deviation is the square root of variance
-      const std = Math.sqrt((sumOfSquares / n) - avg * avg)
+      const std = Math.sqrt((sumOfSquares / validCount) - avg * avg)
       return { min, max, avg, std }
   }
 

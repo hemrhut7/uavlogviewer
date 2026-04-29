@@ -93,12 +93,12 @@ const colorCoderRange = new ColorCoderRange(store)
 
 function getMinTime (data) {
     // returns the minimum time in the array. Used to define the time range
-    return data.reduce((min, p) => p[3] < min ? p[3] : min, data[0][3])
+    return data.reduce((min, p) => (!isNaN(p[3]) && (isNaN(min) || p[3] < min)) ? p[3] : min, data[0][3])
 }
 
 function getMaxTime (data) {
     // returns the maximum time in   the array. Used to define the time range
-    return data.reduce((max, p) => p[3] > max ? p[3] : max, data[0][3])
+    return data.reduce((max, p) => (!isNaN(p[3]) && (isNaN(max) || p[3] > max)) ? p[3] : max, data[0][3])
 }
 
 export default {
@@ -871,11 +871,16 @@ export default {
                     lastIndex++
                 }
                 if (bathymetry.time_boot_ms[lastIndex] >= positions.time_boot_ms[index]) {
-                    positionsWithDepth.push({
-                        latitude: positions.Lat[index] * 1e-7,
-                        longitude: positions.Lng[index] * 1e-7,
-                        depth: bathymetry.Dist[lastIndex]
-                    })
+                    const lat = positions.Lat[index] * 1e-7
+                    const lng = positions.Lng[index] * 1e-7
+                    const depth = bathymetry.Dist[lastIndex]
+                    if (!isNaN(lat) && !isNaN(lng) && !isNaN(depth)) {
+                        positionsWithDepth.push({
+                            latitude: lat,
+                            longitude: lng,
+                            depth: depth
+                        })
+                    }
                 }
             }
             return positionsWithDepth
@@ -892,7 +897,7 @@ export default {
             let positionsWithDepth = this.aggregateDepth(bathymetry, this.state.messages.POS)
 
             // Filter out outliers and invalid readings
-            const depths = positionsWithDepth.map(p => p.depth).filter(d => d > 0.1)
+            const depths = positionsWithDepth.map(p => p.depth).filter(d => d !== null && !isNaN(d) && d > 0.1)
             const mean = depths.reduce((a, b) => a + b, 0) / depths.length
             const stdDev = Math.sqrt(depths.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / depths.length)
 

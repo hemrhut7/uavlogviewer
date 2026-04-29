@@ -404,7 +404,7 @@ export default {
             }
         },
         addMaxMinMeanToTitles   () {
-            const average = arr => arr.length > 0 ? arr.reduce((p, c) => p + (c || 0), 0) / arr.length : 0
+            const average = arr => arr.length > 0 ? arr.reduce((p, c) => p + c, 0) / arr.length : 0
             const gd = this.gd
             const xRange = gd.layout.xaxis.range
 
@@ -414,14 +414,14 @@ export default {
                 let yInside = []
 
                 if (this.state.statsFullRange) {
-                    yInside = trace.y.filter(val => val !== null)
+                    yInside = trace.y.filter(val => val !== null && !isNaN(val))
                 } else {
                     const len = Math.min(trace.x.length, trace.y.length)
                     for (let i = 0; i < len; i++) {
                         const x = trace.x[i]
                         const y = trace.y[i]
 
-                        if (x > xRange[0] && x < xRange[1] && y !== null) {
+                        if (x > xRange[0] && x < xRange[1] && y !== null && !isNaN(y)) {
                             yInside.push(y)
                         }
                     }

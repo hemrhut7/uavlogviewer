@@ -110,6 +110,8 @@ export default {
             const additionalCompletionItems = [
                 'mag_heading_df(MAG[0],ATT)',
                 'mag_heading(RAW_IMU,ATTITUDE)',
+                'constrain_angle(a)',
+                'constrain_angle_180(a)',
                 'max(x,y)',
                 'min(x,y)'
             ]
