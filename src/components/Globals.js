@@ -3,6 +3,8 @@ import '../mavextra/mymavextra'
 
 export const store = {
     // currentTrajectory: [],
+    activeLogIndex: 0,
+    logs: [],
     trajectorySource: '',
     trajectories: {},
     timeTrajectory: {},

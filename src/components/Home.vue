@@ -75,6 +75,7 @@ export default {
     },
     beforeDestroy () {
         this.$eventHub.$off('messages')
+        this.$eventHub.$off('messagesDoneLoading')
     },
     data () {
         return {
@@ -83,99 +84,95 @@ export default {
         }
     },
     methods: {
-        extractFlightData () {
-            if (this.dataExtractor === null) {
-                if (this.state.logType === 'tlog') {
-                    this.dataExtractor = MavlinkDataExtractor
-                } else if (this.state.logType === 'dji') {
-                    this.dataExtractor = DjiDataExtractor
+        extractFlightData (logIndex) {
+            // Default to 0 if not provided (backward compatibility)
+            if (logIndex === undefined) logIndex = 0
+            const log = this.state.logs[logIndex]
+            if (!log) return
+
+            let extractor
+            if (log.logType === 'tlog') {
+                extractor = MavlinkDataExtractor
+            } else if (log.logType === 'dji') {
+                extractor = DjiDataExtractor
+            } else {
+                extractor = DataflashDataExtractor
+            }
+
+            if ('FMTU' in log.messages && log.messages.FMTU.length === 0) {
+                log.processStatus = 'ERROR PARSING?'
+            }
+
+            log.flightModeChanges = extractor.extractFlightModes(log.messages)
+            Vue.delete(log.messages, 'MODE')
+
+            log.events = extractor.extractEvents(log.messages)
+            Vue.delete(log.messages, 'STAT')
+            Vue.delete(log.messages, 'EV')
+
+            log.mission = extractor.extractMission(log.messages)
+            Vue.delete(log.messages, 'CMD')
+
+            log.vehicle = extractor.extractVehicleType(log.messages)
+            log.params = extractor.extractParams(log.messages)
+            if (log.params !== undefined) {
+                log.defaultParams = extractor.extractDefaultParams(log.messages)
+                this.$eventHub.$on('cesium-time-changed', (time) => {
+                    log.params.seek(time)
+                })
+            }
+
+            if (log.vehicle === 'quadcopter') {
+                if (log.params?.get('FRAME_TYPE') === 0) {
+                    log.vehicle += '+'
                 } else {
-                    this.dataExtractor = DataflashDataExtractor
+                    log.vehicle += 'x'
                 }
             }
-            if ('FMTU' in this.state.messages && this.state.messages.FMTU.length === 0) {
-                this.state.processStatus = 'ERROR PARSING?'
-            }
-
-            if (this.state.flightModeChanges.length === 0) {
-                this.state.flightModeChanges = this.dataExtractor.extractFlightModes(this.state.messages)
-            }
-            Vue.delete(this.state.messages, 'MODE')
-
-            if (this.state.events.length === 0) {
-                this.state.events = this.dataExtractor.extractEvents(this.state.messages)
-            }
-            Vue.delete(this.state.messages, 'STAT')
-            Vue.delete(this.state.messages, 'EV')
-
-            if (this.state.mission.length === 0) {
-                this.state.mission = this.dataExtractor.extractMission(this.state.messages)
-            }
-
-            Vue.delete(this.state.messages, 'CMD')
-
-            this.state.vehicle = this.dataExtractor.extractVehicleType(this.state.messages)
-            if (this.state.params === undefined) {
-                this.state.params = this.dataExtractor.extractParams(this.state.messages)
-                if (this.state.params !== undefined) {
-                    this.state.defaultParams = this.dataExtractor.extractDefaultParams(this.state.messages)
-                    if (this.state.params !== undefined) {
-                        this.$eventHub.$on('cesium-time-changed', (time) => {
-                            this.state.params.seek(time)
-                        })
-                    }
-                }
-            }
-            if (this.state.vehicle === 'quadcopter') {
-                if (this.state.params?.get('FRAME_TYPE') === 0) {
-                    this.state.vehicle += '+'
-                } else {
-                    this.state.vehicle += 'x'
-                }
-            }
-            if (this.state.textMessages.length === 0) {
-                this.state.textMessages = this.dataExtractor.extractTextMessages(this.state.messages)
-            }
-            Vue.delete(this.state.messages, 'MSG')
+            log.textMessages = extractor.extractTextMessages(log.messages)
+            Vue.delete(log.messages, 'MSG')
 
             if (this.state.colors.length === 0) {
                 this.generateColorMMap()
             }
-            this.state.attitudeSources = this.dataExtractor.extractAttitudeSources(this.state.messages)
-            if (this.state.attitudeSources.quaternions.length > 0) {
-                const source = this.state.attitudeSources.quaternions[0]
-                this.state.attitudeSource = source
-                this.state.timeAttitudeQ = this.dataExtractor.extractAttitudeQ(this.state.messages, source)
-            } else if (this.state.attitudeSources.eulers.length > 0) {
-                const source = this.state.attitudeSources.eulers[0]
-                this.state.attitudeSource = source
-                this.state.timeAttitude = this.dataExtractor.extractAttitude(this.state.messages, source)
+            log.attitudeSources = extractor.extractAttitudeSources(log.messages)
+            if (log.attitudeSources.quaternions.length > 0) {
+                const source = log.attitudeSources.quaternions[0]
+                log.attitudeSource = source
+                log.timeAttitudeQ = extractor.extractAttitudeQ(log.messages, source)
+            } else if (log.attitudeSources.eulers.length > 0) {
+                const source = log.attitudeSources.eulers[0]
+                log.attitudeSource = source
+                log.timeAttitude = extractor.extractAttitude(log.messages, source)
             }
 
-            const list = Object.keys(this.state.timeAttitude)
-            this.state.lastTime = parseInt(list[list.length - 1])
+            const attitudeData = log.timeAttitude || log.timeAttitudeQ
+            if (attitudeData) {
+                const list = Object.keys(attitudeData)
+                log.lastTime = parseInt(list[list.length - 1])
+            }
 
-            this.state.trajectorySources = this.dataExtractor.extractTrajectorySources(this.state.messages)
-            if (this.state.trajectorySources.length > 0) {
-                const first = this.state.trajectorySources[0]
-                this.state.trajectorySource = first
-                this.state.trajectories = this.dataExtractor.extractTrajectory(
-                    this.state.messages,
+            log.trajectorySources = extractor.extractTrajectorySources(log.messages)
+            if (log.trajectorySources.length > 0) {
+                const first = log.trajectorySources[0]
+                log.trajectorySource = first
+                log.trajectories = extractor.extractTrajectory(
+                    log.messages,
                     first
                 )
                 try {
-                    this.state.currentTrajectory = this.state.trajectories[first].trajectory
-                    this.state.timeTrajectory = this.state.trajectories[first].timeTrajectory
+                    log.currentTrajectory = log.trajectories[first].trajectory
+                    log.timeTrajectory = log.trajectories[first].timeTrajectory
                 } catch {
                     console.log('unable to load trajectory')
                 }
             }
             try {
-                if (this.state.messages?.GPS?.time_boot_ms) {
-                    this.state.metadata = { startTime: this.dataExtractor.extractStartTime(this.state.messages.GPS) }
-                } else {
-                    this.state.metadata = {
-                        startTime: this.dataExtractor.extractStartTime(this.state.messages['GPS[0]'])
+                if (log.messages?.GPS?.time_boot_ms) {
+                    log.metadata = { startTime: extractor.extractStartTime(log.messages.GPS) }
+                } else if (log.messages['GPS[0]']) {
+                    log.metadata = {
+                        startTime: extractor.extractStartTime(log.messages['GPS[0]'])
                     }
                 }
             } catch (error) {
@@ -183,26 +180,37 @@ export default {
                 console.log(error)
             }
             try {
-                this.state.namedFloats = this.dataExtractor.extractNamedValueFloatNames(this.state.messages)
-                console.log(this.state.namedFloats)
+                log.namedFloats = extractor.extractNamedValueFloatNames(log.messages)
             } catch (error) {
                 console.log('unable to load named floats')
                 console.log(error)
             }
-            Vue.delete(this.state.messages, 'AHR2')
-            Vue.delete(this.state.messages, 'POS')
-            Vue.delete(this.state.messages, 'GPS')
+            Vue.delete(log.messages, 'AHR2')
+            Vue.delete(log.messages, 'POS')
+            Vue.delete(log.messages, 'GPS')
 
-            this.state.fences = this.dataExtractor.extractFences(this.state.messages)
+            log.fences = extractor.extractFences(log.messages)
 
-            this.state.processStatus = 'Processed!'
+            log.processStatus = 'Processed!'
+            log.processDone = true
+
+            // For compatibility with single-log components, set global state to latest log
+            this.state.file = log.filename
+            this.state.messages = log.messages
+            this.state.messageTypes = log.messageTypes
+            this.state.currentTrajectory = log.currentTrajectory || []
+            this.state.flightModeChanges = log.flightModeChanges
+            this.state.trajectorySources = log.trajectorySources
+            this.state.attitudeSources = log.attitudeSources
             this.state.processDone = true
+            this.state.processStatus = 'Processed!'
+
             // Change to plot view after 2 seconds so the Processed status is readable
             setTimeout(() => { this.$eventHub.$emit('set-selected', 'plot') }, 2000)
 
             // Only set showMap to true if it is available and was previously unavailable
             if (!this.state.mapAvailable) {
-                this.state.mapAvailable = this.state.currentTrajectory.length > 0
+                this.state.mapAvailable = (log.currentTrajectory && log.currentTrajectory.length > 0)
                 if (this.state.mapAvailable) {
                     this.state.showMap = true
                 }
@@ -222,10 +230,8 @@ export default {
             // colormap used on Cesium
             colorMapOptions.format = 'float'
             this.state.colors = []
-            // this.translucentColors = []
             for (const rgba of colormap(colorMapOptions)) {
                 this.state.colors.push(new Color(rgba[0], rgba[1], rgba[2]))
-                // this.translucentColors.push(new Cesium.Color(rgba[0], rgba[1], rgba[2], 0.1))
             }
         }
     },
@@ -244,20 +250,18 @@ export default {
     },
     computed: {
         mapOk () {
-            return (this.state.flightModeChanges !== undefined &&
-                    this.state.currentTrajectory !== undefined &&
-                    this.state.currentTrajectory.length > 0 &&
-                    (Object.keys(this.state.timeAttitude).length > 0 ||
-                        Object.keys(this.state.timeAttitudeQ).length > 0))
+            return (this.state.currentTrajectory !== undefined &&
+                    this.state.currentTrajectory.length > 0)
         },
         setOfModes () {
             const set = []
-            if (!this.state.flightModeChanges) {
-                return []
-            }
-            for (const mode of this.state.flightModeChanges) {
-                if (!set.includes(mode[1])) {
-                    set.push(mode[1])
+            const logs = this.state.logs.length > 0 ? this.state.logs : [this.state]
+            for (const log of logs) {
+                if (!log.flightModeChanges) continue
+                for (const mode of log.flightModeChanges) {
+                    if (!set.includes(mode[1])) {
+                        set.push(mode[1])
+                    }
                 }
             }
             return set

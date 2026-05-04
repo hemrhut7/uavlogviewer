@@ -1,6 +1,6 @@
 <template>
     <div>
-        <li  v-if="file==null && !sampleLoaded" >
+        <li v-if="!sampleLoaded">
             <a @click="onLoadSample('sample')" class="section"><i class="fas fa-play"></i>  Open Sample </a>
         </li>
         <li v-if="url">
@@ -11,9 +11,9 @@
             <a :href="'/uploaded/' + url" class="section" target="_blank"><i class="fas fa-download"></i> Download</a>
         </li>
         <div @click="browse" @dragover.prevent @drop="onDrop" id="drop_zone"
-        v-if="file==null && uploadpercentage===-1  && !sampleLoaded">
-            <p>Drop *.tlog or *.bin file here or click to browse</p>
-            <input @change="onChange" id="choosefile" style="opacity: 0;" type="file">
+        v-if="uploadpercentage===-1">
+            <p>Drop *.tlog or *.bin files here or click to browse</p>
+            <input @change="onChange" id="choosefile" style="opacity: 0;" type="file" multiple>
         </div>
         <!--<b-form-checkbox @change="uploadFile()" class="uploadCheckbox" v-if="file!=null && !uploadStarted"> Upload
         </b-form-checkbox>-->
@@ -68,35 +68,74 @@ export default {
         },
         onLoadSample (file) {
             let url
+            let filename
+            let logType
             if (file === 'sample') {
-                this.state.file = 'sample'
+                filename = 'sample'
                 url = require('../assets/vtol.tlog').default
-                this.state.logType = 'tlog'
+                logType = 'tlog'
             } else {
                 url = file
                 // Set the file name for display purposes
                 const urlParts = url.split('/')
-                this.state.file = urlParts[urlParts.length - 1]
+                filename = urlParts[urlParts.length - 1]
+                logType = url.indexOf('.tlog') > 0 ? 'tlog' : 'bin'
+                if (url.indexOf('.txt') > 0) {
+                    logType = 'dji'
+                }
             }
+
+            const logEntry = {
+                filename: filename,
+                processStatus: 'Downloading...',
+                processPercentage: 0,
+                messages: {},
+                messageTypes: {},
+                metadata: null,
+                logType: logType
+            }
+            this.state.logs.push(logEntry)
+            const logIndex = this.state.logs.length - 1
+            this.state.activeLogIndex = logIndex
+
             const oReq = new XMLHttpRequest()
             console.log(`loading file from ${url}`)
-
-            // Set the log type based on file extension
-            this.state.logType = url.indexOf('.tlog') > 0 ? 'tlog' : 'bin'
-            if (url.indexOf('.txt') > 0) {
-                this.state.logType = 'dji'
-            }
 
             oReq.open('GET', url, true)
             oReq.responseType = 'arraybuffer'
 
-            // Use arrow function to preserve 'this' context
+            const logWorker = new Worker()
+            logWorker.onmessage = (event) => {
+                const log = this.state.logs[logIndex]
+                if (event.data.percentage) {
+                    log.processPercentage = event.data.percentage
+                    this.state.processPercentage = event.data.percentage
+                } else if (event.data.availableMessages) {
+                    log.messageTypes = event.data.availableMessages
+                    this.$eventHub.$emit('messageTypes', event.data.availableMessages, logIndex)
+                } else if (event.data.metadata) {
+                    log.metadata = event.data.metadata
+                } else if (event.data.messages) {
+                    log.messages = event.data.messages
+                    this.$eventHub.$emit('messages', logIndex)
+                } else if (event.data.messagesDoneLoading) {
+                    this.$eventHub.$emit('messagesDoneLoading', logIndex)
+                } else if (event.data.messageType) {
+                    log.messages[event.data.messageType] = event.data.messageList
+                    this.$eventHub.$emit('messages', logIndex)
+                } else if (event.data.files) {
+                    log.files = event.data.files
+                    this.$eventHub.$emit('messages', logIndex)
+                } else if (event.data.url) {
+                    this.downloadFileFromURL(event.data.url)
+                }
+            }
+
             oReq.onload = (oEvent) => {
                 const arrayBuffer = oReq.response
-
                 this.transferMessage = 'Download Done'
                 this.sampleLoaded = true
-                worker.postMessage({
+                logWorker.postMessage({
                     action: 'parse',
                     file: arrayBuffer,
                     isTlog: (url.indexOf('.tlog') > 0),
@@ -106,6 +145,8 @@ export default {
             oReq.addEventListener('progress', (e) => {
                 if (e.lengthComputable) {
                     this.uploadpercentage = 100 * e.loaded / e.total
+                    this.state.logs[logIndex].processPercentage = this.uploadpercentage
+                    this.state.logs[logIndex].processStatus = 'Downloading...'
                 }
             }
             , false)
@@ -118,7 +159,9 @@ export default {
         },
         onChange (ev) {
             const fileinput = document.getElementById('choosefile')
-            this.process(fileinput.files[0])
+            for (let i = 0; i < fileinput.files.length; i++) {
+                this.process(fileinput.files[i])
+            }
         },
         onDrop (ev) {
             // Prevent default behavior (Prevent file from being opened)
@@ -135,8 +178,7 @@ export default {
             } else {
                 // Use DataTransfer interface to access the file(s)
                 for (let i = 0; i < ev.dataTransfer.files.length; i++) {
-                    console.log('... file[' + i + '].name = ' + ev.dataTransfer.files[i].name)
-                    console.log(ev.dataTransfer.files[i])
+                    this.process(ev.dataTransfer.files[i])
                 }
             }
         },
@@ -147,23 +189,58 @@ export default {
             })
         },
         process: function (file) {
-            this.state.file = file.name
-            this.state.processStatus = 'Pre-processing...'
-            this.state.processPercentage = 100
-            this.file = file
+            const logEntry = {
+                filename: file.name,
+                processStatus: 'Pre-processing...',
+                processPercentage: 100,
+                messages: {},
+                messageTypes: {},
+                metadata: null,
+                logType: file.name.endsWith('tlog') ? 'tlog' : 'bin'
+            }
+            if (file.name.endsWith('.txt')) {
+                logEntry.logType = 'dji'
+            }
+            this.state.logs.push(logEntry)
+            const logIndex = this.state.logs.length - 1
+            this.state.activeLogIndex = logIndex
+
+            const logWorker = new Worker()
+            logWorker.onmessage = (event) => {
+                const log = this.state.logs[logIndex]
+                if (event.data.percentage) {
+                    log.processPercentage = event.data.percentage
+                    this.state.processPercentage = event.data.percentage // for global progress bar
+                } else if (event.data.availableMessages) {
+                    log.messageTypes = event.data.availableMessages
+                    this.$eventHub.$emit('messageTypes', event.data.availableMessages, logIndex)
+                } else if (event.data.metadata) {
+                    log.metadata = event.data.metadata
+                } else if (event.data.messages) {
+                    log.messages = event.data.messages
+                    this.$eventHub.$emit('messages', logIndex)
+                } else if (event.data.messagesDoneLoading) {
+                    this.$eventHub.$emit('messagesDoneLoading', logIndex)
+                } else if (event.data.messageType) {
+                    log.messages[event.data.messageType] = event.data.messageList
+                    this.$eventHub.$emit('messages', logIndex)
+                } else if (event.data.files) {
+                    log.files = event.data.files
+                    this.$eventHub.$emit('messages', logIndex)
+                } else if (event.data.url) {
+                    this.downloadFileFromURL(event.data.url)
+                }
+            }
+
             const reader = new FileReader()
             reader.onload = function (e) {
                 const data = reader.result
-                worker.postMessage({
+                logWorker.postMessage({
                     action: 'parse',
                     file: data,
                     isTlog: (file.name.endsWith('tlog')),
                     isDji: (file.name.endsWith('txt'))
                 })
-            }
-            this.state.logType = file.name.endsWith('tlog') ? 'tlog' : 'bin'
-            if (file.name.endsWith('.txt')) {
-                this.state.logType = 'dji'
             }
             reader.readAsArrayBuffer(file)
         },

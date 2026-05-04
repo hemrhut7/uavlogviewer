@@ -23,56 +23,62 @@
             <li class="input-li">
                 <input id="filterbox" placeholder=" Type here to filter..." v-model="filter">
             </li>
-            <template v-for="key of Object.keys(this.messageTypesFiltered).sort()">
-                <li class="type" v-bind:key="key">
-                    <div
-                        v-b-toggle="'type' + key"
-                        :title="messageDocs[key.split('[')[0]] ? messageDocs[key.split('[')[0]].doc : ''"
-                    >
-                        <a class="section">{{key}} <span v-if="messageTypes[key].isArray">{{"[...]"}}</span>
-                            <i class="expand fas fa-caret-down"></i>
-                            <span class="description">
-                              {{ messageDocs[key.split('[')[0]] ? messageDocs[key.split('[')[0]].doc : '' }}
-                            </span>
-                        </a>
-                    </div>
-                </li>
-                <b-collapse :id="'type' + key" v-bind:key="key+'1'">
-                    <template v-for="item in messageTypes[key].complexFields">
-                        <li @click="toggle(key, item.name, 0)"
-                            class="field"
-                            :title="messageDocs[key] ? messageDocs[key][item.name] : ''"
-                            v-bind:key="key+'.'+item.name"
-                            v-if="isPlottable(key,item.name)
-                                && item.name.toLowerCase().indexOf(filter.toLowerCase()) !== -1">
-                            <div class="field-content">
-                                <a> {{item.name}}
-                                    <span v-if="item.units!=='?' && item.units!==''"> ({{item.units}})</span>
-                                </a>
+            <div v-for="(log, logIdx) in state.logs" :key="'log-messages-' + logIdx" class="log-messages-group">
+                <div class="log-header" v-if="state.logs.length > 1">
+                    <i class="fas fa-file-alt"></i> {{ log.filename }}
+                </div>
+                <template v-for="key of Object.keys(logMessageTypesFiltered(logIdx)).sort()">
+                    <li class="type" v-bind:key="logIdx + '-' + key">
+                        <div
+                            v-b-toggle="'type' + logIdx + '-' + key"
+                            :title="messageDocs[key.split('[')[0]] ? messageDocs[key.split('[')[0]].doc : ''"
+                        >
+                            <a class="section">{{key}} <span v-if="log.messageTypes[key].isArray">{{"[...]"}}</span>
+                                <i class="expand fas fa-caret-down"></i>
                                 <span class="description">
-                                  {{ messageDocs[key] ? messageDocs[key][item.name.split('[')[0]] : '' }}
+                                  {{ messageDocs[key.split('[')[0]] ? messageDocs[key.split('[')[0]].doc : '' }}
                                 </span>
-                            </div>
-
-                            <div class="chart-indicators" v-if="state.charts.length > 1">
-                                <span v-for="(chart, idx) in state.charts"
-                                      :key="'chart-btn-' + idx"
-                                      class="chart-btn"
-                                      :class="{ active: isPlottedInChart(key, item.name, idx) }"
-                                      @click.stop="toggle(key, item.name, idx)"
-                                      :title="'Toggle on Chart ' + (idx + 1)">
-                                    {{ idx + 1 }}
-                                </span>
-                            </div>
-
-                            <a @click.stop="toggle(key, item.name)"
-                               v-if="state.charts.length === 1 && isPlotted(key, item.name)" class="remove-container">
-                                <i class="remove-icon fas fa-trash" title="Remove from all charts"></i>
                             </a>
-                        </li>
-                    </template>
-                </b-collapse>
-            </template>
+                        </div>
+                    </li>
+                    <b-collapse :id="'type' + logIdx + '-' + key" v-bind:key="logIdx + '-' + key + '1'">
+                        <template v-for="item in log.messageTypes[key].complexFields">
+                            <li @click="toggle(logIdx, key, item.name, 0)"
+                                class="field"
+                                :title="messageDocs[key] ? messageDocs[key][item.name] : ''"
+                                v-bind:key="logIdx + '-' + key + '.' + item.name"
+                                v-if="isPlottable(logIdx, key, item.name)
+                                    && item.name.toLowerCase().indexOf(filter.toLowerCase()) !== -1">
+                                <div class="field-content">
+                                    <a> {{item.name}}
+                                        <span v-if="item.units!=='?' && item.units!==''"> ({{item.units}})</span>
+                                    </a>
+                                    <span class="description">
+                                      {{ messageDocs[key] ? messageDocs[key][item.name.split('[')[0]] : '' }}
+                                    </span>
+                                </div>
+
+                                <div class="chart-indicators" v-if="state.charts.length > 1">
+                                    <span v-for="(chart, idx) in state.charts"
+                                          :key="'chart-btn-' + idx"
+                                          class="chart-btn"
+                                          :class="{ active: isPlottedInChart(logIdx, key, item.name, idx) }"
+                                          @click.stop="toggle(logIdx, key, item.name, idx)"
+                                          :title="'Toggle on Chart ' + (idx + 1)">
+                                        {{ idx + 1 }}
+                                    </span>
+                                </div>
+
+                                <a @click.stop="toggle(logIdx, key, item.name)"
+                                   v-if="state.charts.length === 1 && isPlotted(logIdx, key, item.name)"
+                                   class="remove-container">
+                                    <i class="remove-icon fas fa-trash" title="Remove from all charts"></i>
+                                </a>
+                            </li>
+                        </template>
+                    </b-collapse>
+                </template>
+            </div>
         </b-collapse>
     </div>
 </template>
@@ -197,140 +203,80 @@ export default {
             }
             return logDocs
         },
-        handleMessageTypes (messageTypes) {
+        handleMessageTypes (messageTypes, logIndex) {
             if (this.$route.query.plots) {
                 this.state.plotOn = true
             }
-            const newMessages = {}
-            // populate list of message types
-            for (const messageType of Object.keys(messageTypes)) {
-                if (messageTypes[messageType].instances !== undefined) {
-                    continue
-                }
-                this.$set(this.checkboxes, messageType, messageTypes[messageType].expressions.expressions)
-                newMessages[messageType] = messageTypes[messageType]
-            }
-            // populate checkbox status
-            for (const messageType of Object.keys(messageTypes)) {
-                if (messageTypes[messageType].instances !== undefined) {
-                    continue
-                }
-                this.checkboxes[messageType] = { expressions: {} }
-                // for (let field of this.getMessageNumericField(this.state.messages[messageType][0])) {
-                for (const field of messageTypes[messageType].expressions) {
-                    if (this.state.plotOn) {
-                        this.checkboxes[messageType].expressions[field] =
-                            this.$route.query?.plots?.indexOf(messageType + '.' + field) !== -1
-                    } else {
-                        this.checkboxes[messageType].expressions[field] = false
-                    }
-                }
-            }
-            this.messageTypes = newMessages
-            this.$set(this.state, 'messageTypes', newMessages)
         },
-        isPlotted (message, field) {
-            const fullname = message + '.' + field
+        getFullname (logIdx, message, field) {
+            if (logIdx === 0) return message + '.' + field
+            return `[${logIdx}]${message}.${field}`
+        },
+        isPlotted (logIdx, message, field) {
+            const fullname = this.getFullname(logIdx, message, field)
             return this.state.charts.some(chart =>
                 chart.expressions.some(e => e.name === fullname)
             )
         },
-        isPlottedInChart (message, field, chartIdx) {
-            const fullname = message + '.' + field
+        isPlottedInChart (logIdx, message, field, chartIdx) {
+            const fullname = this.getFullname(logIdx, message, field)
             const chart = this.state.charts[chartIdx]
             if (!chart) return false
             return chart.expressions.some(e => e.name === fullname)
         },
-        getMessageNumericField (message) {
-            const numberFields = []
-            if (message && message.fieldnames) {
-                for (const field of message.fieldnames) {
-                    if (!isNaN(message[field])) {
-                        numberFields.push(field)
+        toggle (logIdx, message, item, chartIdx) {
+            this.state.plotOn = true
+            const fullname = this.getFullname(logIdx, message, item)
+            this.$nextTick(function () {
+                this.$eventHub.$emit('togglePlot', fullname, undefined, undefined, chartIdx)
+            })
+        },
+        logMessageTypesFiltered (logIdx) {
+            const log = this.state.logs[logIdx]
+            if (!log || !log.messageTypes) return {}
+            const filtered = {}
+            for (const key of Object.keys(log.messageTypes)) {
+                if (this.hiddenTypes.indexOf(key) === -1) {
+                    if (this.filter === '') {
+                        filtered[key] = log.messageTypes[key]
+                        continue
+                    }
+                    if (log.messageTypes[key].expressions
+                        .filter(field => field.toLowerCase().indexOf(this.filter.toLowerCase()) !== -1).length > 0) {
+                        filtered[key] = log.messageTypes[key]
                     }
                 }
             }
-            return numberFields
+            return filtered
         },
-        toggle (message, item, chartIdx) {
-            this.state.plotOn = true
-            this.$nextTick(function () {
-                this.$eventHub.$emit('togglePlot', message + '.' + item, undefined, undefined, chartIdx)
-            })
-        },
-        isPlottable (msgtype, item) {
-            return item !== 'TimeUS'
-        },
-        collapse (name) {
-            if (document.getElementById(name) &&
-                document.getElementById(name).style &&
-                document.getElementById(name).style.display !== 'none') {
-                this.$root.$emit('bv::toggle::collapse', name)
-            }
-        },
-        expand (name) {
-            if (document.getElementById(name) &&
-                document.getElementById(name).style &&
-                document.getElementById(name).style.display === 'none') {
-                this.$root.$emit('bv::toggle::collapse', name)
-            }
-        },
-        findMessagesInExpression (expression) {
-            // delete all expressions after dots (and dots)
-            const toDelete = /\.[A-Za-z-0-9_]+/g
-            const name = expression.replace(toDelete, '')
-            const RE = /[A-Z][A-Z0-9_]+(\[0-9\])?/g
-            const fields = name.match(RE)
-            if (fields === null) {
-                return []
-            }
-            return fields
-        },
-        isAvailable (msg) {
+        isAvailable (msg, logIdx = 0) {
             const msgRe = /[A-Z][A-Z0-9_]+(\[[0-9]\])?(\.[a-zA-Z0-9_]+)?/g
             const match = msg[0].match(msgRe)
-            if (!match) {
-                return true
-            }
+            if (!match) return true
+            const log = this.state.logs[logIdx]
+            if (!log || !log.messageTypes) return false
+
             const msgName = match[0].split('.')[0]
-            if (!this.messageTypes[msgName]) {
-                return false
-            }
+            if (!log.messageTypes[msgName]) return false
+
             const fieldName = match[0].split('.')[1]
-            if (fieldName === undefined) {
-                return true
-            }
-            if (!this.messageTypes[msgName].complexFields[fieldName]) {
-                console.log('missing field ' + msgName + '.' + fieldName)
+            if (fieldName === undefined) return true
+
+            if (log.messageTypes[msgName].expressions.indexOf(fieldName) < 0) {
                 return false
             }
+            return true
+        },
+        isPlottable (logIdx, message, field) {
+            const log = this.state.logs[logIdx]
+            if (!log || !log.messageTypes || !log.messageTypes[message]) return false
+            // For now assume all fields in complexFields are plottable if they exist
             return true
         }
     },
     computed: {
         hasMessages () {
-            return Object.keys(this.messageTypes).length > 0
-        },
-        messageTypesFiltered () {
-            const filtered = {}
-            for (const key of Object.keys(this.messageTypes)) {
-                if (this.hiddenTypes.indexOf(key) === -1) {
-                    if (this.filter === '') {
-                        this.collapse('type' + key)
-                        filtered[key] = this.messageTypes[key]
-                        continue
-                    }
-                    if (this.messageTypes[key].expressions
-                        .filter(field => field.toLowerCase().indexOf(this.filter.toLowerCase()) !== -1).length > 0) {
-                        filtered[key] = this.messageTypes[key]
-                        // console.log('type' + key, document.getElementById('type' + key))
-                        this.expand('type' + key)
-                    } else {
-                        this.collapse('type' + key)
-                    }
-                }
-            }
-            return filtered
+            return this.state.logs.some(log => log.messageTypes && Object.keys(log.messageTypes).length > 0)
         },
         availableMessagePresets () {
             const dict = {}
@@ -343,7 +289,7 @@ export default {
                     if (field[0] === '') {
                         continue
                     }
-                    missing = missing || !this.isAvailable(field)
+                    missing = missing || !this.isAvailable(field, 0)
                     if (!missing) {
                         if (!(key in dict)) {
                             dict[key] = { messages: [[...field, color++]] }
@@ -362,7 +308,7 @@ export default {
                 let color = 0
                 for (const field of value) {
                     // If all of the expressions match, add this and move on
-                    missing = missing || !this.isAvailable(field)
+                    missing = missing || !this.isAvailable(field, 0)
                     if (!missing) {
                         if (!(key in dict)) {
                             dict[key] = { messages: [[...field, color++]] }
@@ -392,6 +338,38 @@ export default {
 }
 </script>
 <style scoped>
+    i {
+        margin: 5px;
+    }
+    i.expand {
+        float: right;
+    }
+    li > div {
+        display: inline-block;
+        width: 100%;
+    }
+    li.field {
+        line-height: 29px;
+        padding-left: 40px;
+        font-size: 90%;
+        display: inline-block;
+        vertical-align: middle;
+        width: 100%;
+    }
+    li.type {
+        line-height: 30px;
+        padding-left: 10px;
+        font-size: 85%;
+    }
+    .log-header {
+        padding: 8px 10px;
+        background: rgba(100, 233, 255, 0.1);
+        color: #64e9ff;
+        font-weight: bold;
+        font-size: 12px;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        margin-top: 5px;
+    }
     i {
         margin: 5px;
     }

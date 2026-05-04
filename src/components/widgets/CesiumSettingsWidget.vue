@@ -80,7 +80,9 @@ export default {
     },
     computed: {
         attitudeSources () {
-            return [...this.state.attitudeSources.quaternions, ...this.state.attitudeSources.eulers]
+            const quaternions = this.state.attitudeSources?.quaternions || []
+            const eulers = this.state.attitudeSources?.eulers || []
+            return [...quaternions, ...eulers]
         }
     }
 }

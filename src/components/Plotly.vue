@@ -10,43 +10,7 @@ import { faWindowRestore } from '@fortawesome/free-solid-svg-icons'
 import Vue from 'vue'
 import { isNumber } from 'underscore'
 
-const Color = require('color')
-
 const timeformat = ':02,2f'
-let annotationsEvents = []
-const annotationsModes = []
-let annotationsParams = []
-
-const updatemenus = [
-    {
-        active: 0,
-        buttons: [
-            {
-                args: ['annotations', annotationsModes],
-                label: 'Nothing',
-                method: 'relayout'
-            },
-            {
-                args: ['annotations', [...annotationsEvents, ...annotationsModes]],
-                label: 'Events',
-                method: 'relayout'
-            },
-            {
-                args: ['annotations', [...annotationsEvents, ...annotationsModes, ...annotationsParams]],
-                label: 'Events + Params',
-                method: 'relayout'
-            }
-        ],
-        direction: 'left',
-        pad: { r: 10, t: 10 },
-        showactive: true,
-        type: 'buttons',
-        x: 0.1,
-        xanchor: 'left',
-        y: 1.2,
-        yanchor: 'top'
-    }
-]
 
 const plotOptions = {
     legend: {
@@ -158,6 +122,7 @@ export default {
         this.$eventHub.$on('force-resize-plotly', this.resize)
         this.$eventHub.$on('child-zoomed', this.onTimeRangeChanged)
         this.$eventHub.$on('recalc-stats', this.addMaxMinMeanToTitles)
+        this.$eventHub.$on('recalc-plots', this.plot)
         this.zoomInterval = null
     },
     mounted () {
@@ -213,6 +178,7 @@ export default {
         this.$eventHub.$off('force-resize-plotly', this.resize)
         this.$eventHub.$off('child-zoomed', this.onTimeRangeChanged)
         this.$eventHub.$off('recalc-stats', this.addMaxMinMeanToTitles)
+        this.$eventHub.$off('recalc-plots', this.plot)
         this.$eventHub.$off('addPlots', this.addPlots)
         this.$eventHub.$off('plot', this.plot)
         this.$eventHub.$off('clearPlot', this.clearPlot)
@@ -244,24 +210,16 @@ export default {
                     path: faWindowRestore.icon[4]
                 }, // Use any icon available
                 click: (gd) => {
-                    // const plotData = JSON.parse(JSON.stringify(gd.data))
-                    // const plotLayout = JSON.parse(JSON.stringify(gd.layout))
-                    // const plotConfig = { showLink: false, displayModeBar: true }
-
-                    // Open a new window
                     const newWindow = window.open(
                         '/#/plot', '_blank',
                         'toolbar=no,scrollbars=yes,resizable=yes,top=500,left=500,width=800,height=400,allow-scripts'
                     )
                     const externalPlotInterval = setInterval(() => {
                         try {
-                            console.log(newWindow)
-                            console.log(newWindow.setPlotData)
                             newWindow.setPlotData(gd.data)
                             newWindow.setPlotOptions(gd.layout)
                             newWindow.setCssColors(this.state.cssColors)
                             newWindow.setFlightModeChanges(this.state.flightModeChanges)
-                            console.log(this.$eventHub)
                             newWindow.setEventHub(this.$eventHub)
                             newWindow.plot()
                             clearInterval(externalPlotInterval)
@@ -270,7 +228,6 @@ export default {
                         }
                     }, 1000)
                     this.state.childPlots.push(newWindow)
-                    console.log(newWindow)
                 }
             }
         },
@@ -280,7 +237,6 @@ export default {
                 title: 'Download data as csv',
                 icon: Plotly.Icons.disk,
                 click: () => {
-                    console.log(this.gd.data)
                     const data = this.gd.data
                     const header = ['timestamp(ms)']
                     for (const series of data) {
@@ -301,7 +257,6 @@ export default {
                     }
                     finaltime = Math.min(finaltime, this.state.timeRange[1])
                     currentTime = Math.max(currentTime, this.state.timeRange[0])
-                    // replace commas with semicolons so csv headers dont break, check #412
                     const csv = [header.map(e => e.replace(',', ';'))]
                     while (currentTime < finaltime - interval) {
                         const line = [currentTime]
@@ -349,6 +304,7 @@ export default {
             Plotly.Plots.resize(this.gd)
         },
         waitForMessages (messages) {
+            // Updated to check messages across all logs
             for (const message of messages) {
                 this.$eventHub.$emit('loadType', message)
             }
@@ -358,10 +314,11 @@ export default {
             return new Promise((resolve, reject) => {
                 interval = setInterval(function () {
                     for (const message of messages) {
-                        if (!_this.loadedMessages().includes(message)) {
+                        const [logIdx, msgName] = _this.parseLogIndex(message)
+                        const log = _this.state.logs[logIdx]
+                        if (!log || !log.messages[msgName]) {
                             counter += 1
-                            if (counter > 30) { // 30 * 300ms = 9 s timeout
-                                console.log('not resolving')
+                            if (counter > 30) {
                                 clearInterval(interval)
                                 reject(new Error(`Could not load messageType ${message}`))
                             }
@@ -376,7 +333,6 @@ export default {
         onRangeChanged (event) {
             this.addMaxMinMeanToTitles()
             if (event !== undefined && this.state.syncZoom) {
-                // this.$router.push({query: query})
                 if (event['xaxis.range']) {
                     this.state.timeRange = event['xaxis.range']
                     this.updatChildrenTimeRange(this.state.timeRange)
@@ -393,9 +349,7 @@ export default {
         },
 
         onTimeRangeChanged (timeRange) {
-            // check if it actually changed, with a delta tolarance
             this.state.timeRange = timeRange
-
             this.updatChildrenTimeRange(this.state.timeRange)
         },
         updatChildrenTimeRange (timeRange) {
@@ -456,12 +410,10 @@ Std: ${std.toFixed(2)}`
             return false
         },
         getFirstFreeAxis () {
-            // get free axis number
             for (const i of this.state.allAxis) {
                 let taken = false
                 for (const field of this.chart.expressions) {
-                    // eslint-disable-next-line
-                    if (field.axis == i) {
+                    if (field.axis === i) {
                         taken = true
                     }
                 }
@@ -472,12 +424,10 @@ Std: ${std.toFixed(2)}`
             return this.state.allAxis.length - 1
         },
         getFirstFreeColor () {
-            // get free color
             for (const i of this.state.allColors) {
                 let taken = false
                 for (const field of this.chart.expressions) {
-                    // eslint-disable-next-line
-                    if (field.color == i) {
+                    if (field.color === i) {
                         taken = true
                     }
                 }
@@ -509,28 +459,21 @@ Std: ${std.toFixed(2)}`
             }
             this.state.plotLoading = true
             const requested = new Set()
-            const RE = /[A-Z][A-Z0-9_]+(\[[0-9]\])?\.[a-zA-Z0-9]+/g
-            const RE2 = /[A-Z][A-Z0-9_]+(\[[0-9]\])/g
             for (const plot of plots) {
                 const expression = plot[0]
-                // ensure we have the data
-                let messages = expression.match(RE)
-                // not match ATT, GPS
-                messages = expression.match(RE2)
+                const messages = this.findMessagesInExpression(expression)
                 if (messages !== null) {
-                    for (const message of messages) {
-                        if (!(message in this.state.messages)) {
-                            if (requested.has(message)) {
-                                continue
-                            }
-                            console.log('missing message type: ' + message)
-                            requested.add(message)
+                    for (const [msgWithPrefix] of messages) {
+                        const [logIdx, msgName] = this.parseLogIndex(msgWithPrefix)
+                        const log = this.state.logs[logIdx]
+                        if (!log || !(msgName in log.messages)) {
+                            if (requested.has(msgWithPrefix)) continue
+                            requested.add(msgWithPrefix)
                         }
                     }
                 }
             }
             if ([...requested].length > 0) {
-                console.log([...requested])
                 this.waitForMessages([...requested]).then(() => {
                     this.addPlots(plots, targetChartIndex)
                 })
@@ -550,16 +493,14 @@ Std: ${std.toFixed(2)}`
                 }
             }
             this.chart.expressions.push(...newplots)
+            this.plot()
         },
         removePlot (fieldname) {
-            const index = this.chart.expressions.indexOf(fieldname) // <-- Not supported in <IE9
+            const index = this.chart.expressions.indexOf(fieldname)
             if (index !== -1) {
                 this.chart.expressions.splice(index, 1)
             }
             this.plot()
-            if (this.chart.expressions.length === 0) {
-                // this.state.plotOn = false // don't turn off globally yet
-            }
             this.onRangeChanged()
         },
         clearPlot () {
@@ -568,13 +509,10 @@ Std: ${std.toFixed(2)}`
             }
         },
         resetAxis (index) {
-            // Resets the Y axis so that the next plot autoranges
-            // unfortunately the axis are named yaxis, yaxis2, yaxis3... and so on
             let suffix = ''
             suffix = index === 0 ? suffix : parseInt(index) + 1
             const key = 'yaxis' + suffix
             const obj = {}
-            // Use older dict and set autorange to true
             obj[key] = plotOptions[key]
             obj[key].autorange = true
             Plotly.relayout(this.gd, obj)
@@ -592,147 +530,100 @@ Std: ${std.toFixed(2)}`
                 }
                 this.resetAxis(this.chart.expressions[index].axis)
                 this.chart.expressions.splice(index, 1)
-                if (this.chart.expressions.length === 0) {
-                    // this.state.plotOn = false
-                }
+                this.plot()
                 this.onRangeChanged()
             } else {
                 this.addPlots([[fieldname, axis, color]], targetChartIndex)
             }
-            console.log(this.chart.expressions)
-            // if (silent !== true) {
-            //     this.plot()
-            //     this.state.plotLoading = false
-            // }
         },
         calculateXAxisDomain () {
             let start = 0.02
             let end = 0.98
             for (const field of this.chart.expressions) {
-                if (field.axis === 0) {
-                    start = Math.max(start, 0.03)
-                } else if (field.axis === 1) {
-                    start = Math.max(start, 0.07)
-                } else if (field.axis === 2) {
-                    start = Math.max(start, 0.11)
-                } else if (field.axis === 5) {
-                    end = Math.min(end, 0.96)
-                } else if (field.axis === 4) {
-                    end = Math.min(end, 0.92)
-                } else if (field.axis === 3) {
-                    end = Math.min(end, 0.88)
-                }
+                if (field.axis === 0) start = Math.max(start, 0.03)
+                else if (field.axis === 1) start = Math.max(start, 0.07)
+                else if (field.axis === 2) start = Math.max(start, 0.11)
+                else if (field.axis === 5) end = Math.min(end, 0.96)
+                else if (field.axis === 4) end = Math.min(end, 0.92)
+                else if (field.axis === 3) end = Math.min(end, 0.88)
             }
             return [start, end]
         },
         getAxisTitle (fieldAxis) {
             const names = []
             for (const field of this.chart.expressions) {
-                if (field.axis === fieldAxis) {
-                    names.push(field.name)
-                }
+                if (field.axis === fieldAxis) names.push(field.name)
             }
             return names.join(', ')
         },
+        parseLogIndex (msgWithPrefix) {
+            const match = msgWithPrefix.match(/^\[(?<index>[0-9]+)\](?<message>.+)$/)
+            if (match) {
+                return [parseInt(match.groups.index), match.groups.message]
+            }
+            return [0, msgWithPrefix] // Default to log 0
+        },
         findMessagesInExpression (expression) {
-            const RE = /(?<message>[A-Z][A-Z0-9_]+(\[[A-Za-z0-9_.]+\])?)(\.(?<field>[A-Za-z0-9_]+))?/g
+            const RE = /(?<prefix>\[[0-9]+\])?(?<message>[A-Z][A-Z0-9_]+(\[[A-Za-z0-9_.]+\])?)(\.(?<field>[A-Za-z0-9_]+))?/g
             const match = []
             for (const m of expression.matchAll(RE)) {
-                match.push([m.groups.message, m.groups.field])
+                const prefix = m.groups.prefix || ''
+                match.push([prefix + m.groups.message, m.groups.field])
             }
             return match
         },
         expressionCanBePlotted (expression, reask = false) {
-            // TODO: USE this regex with lookahead once firefox supports it
-            // let RE = /(?<!\.)\b[A-Z][A-Z0-9_]+\b/g
-            // let fields = expression.name.match(RE)
             const messages = this.findMessagesInExpression(expression.name)
-
-            if (messages === null) {
-                return [true, '']
-            }
-            for (const [message, field] of messages) {
-                if (!(this.messagesInLog.includes(message))) {
-                    console.log('ERROR: attempted to plot unavailable message: ' + message)
-                    this.state.plotLoading = false
-                    if (reask) {
-                        this.$eventHub.$emit('loadType', message)
-                    }
-                    return [false, `invalid message: ${message}`]
+            if (messages === null) return [true, '']
+            for (const [msgWithPrefix, field] of messages) {
+                const [logIdx, msgName] = this.parseLogIndex(msgWithPrefix)
+                const log = this.state.logs[logIdx]
+                if (!log) return [false, `invalid log index: ${logIdx}`]
+                if (!(msgName in log.messages)) {
+                    if (reask) this.$eventHub.$emit('loadType', msgWithPrefix)
+                    return [false, `invalid message: ${msgName}`]
                 }
                 if (field !== undefined) {
-                    if (field !== 'time_boot_ms' && this.state.messageTypes[message].expressions.indexOf(field) < 0) {
-                        console.log('ERROR: attempted to plot unavailable field: ' + field)
-                        return [false, `invalid field: ${message}.${field}`]
+                    if (field !== 'time_boot_ms' && log.messageTypes[msgName].expressions.indexOf(field) < 0) {
+                        return [false, `invalid field: ${msgName}.${field}`]
                     }
                 }
-                console.log(message + ' is plottable')
             }
             return [true, '']
         },
-        messagesAreAvailable (messages) {
-            // TODO: USE this regex with lookahead once firefox supports it
-            // let RE = /(?<!\.)\b[A-Z][A-Z0-9_]+\b/g
-            // let fields = expression.name.match(RE)
-            for (const message of messages) {
-                if (!(message in this.state.messages) || this.state.messages[message].lenght === 0) {
-                    if (!((message) in this.state.messages) ||
-                        this.state.messages[message].lenght === 0) {
-                        return false
-                    }
-                }
-            }
-            return true
-        },
         evaluateExpression (expression1) {
-            const start = new Date()
-            if (expression1 in this.state.plotCache) {
-                console.log('HIT: ' + expression1)
-                return this.state.plotCache[expression1]
-            }
-            console.log('MISS! evaluating : ' + expression1)
-            // TODO: USE this regex with lookahead once firefox supports it
-            // let RE = /(?<!\.)\b[A-Z][A-Z0-9_]+\b/g
-            let fields = this.findMessagesInExpression(expression1).map(field => field[0])
-            console.log(fields)
-            fields = fields === null ? [] : fields
-            const messages = fields.length !== 0 ? (fields) : []
-            // use time of first message for now
+            if (expression1 in this.state.plotCache) return this.state.plotCache[expression1]
+
+            const messagesWithFields = this.findMessagesInExpression(expression1)
+            const fields = messagesWithFields.map(f => f[0])
+
             let x
-            if (messages.length > 0) {
-                if (this.state.messages[messages[0]] === undefined) {
-                    console.log('ERROR: message ' + messages[0] + ' not found')
-                    return { error: 'message ' + messages[0] + ' not found' }
-                }
-                x = this.state.messages[messages[0]].time_boot_ms
+            if (fields.length > 0) {
+                const [logIdx, msgName] = this.parseLogIndex(fields[0])
+                const log = this.state.logs[logIdx]
+                if (!log || !log.messages[msgName]) return { error: 'message ' + fields[0] + ' not found' }
+                x = log.messages[msgName].time_boot_ms
             } else {
+                // Fallback for expressions without messages
+                const log = this.state.logs[0] || this.state
                 try {
-                    x = this.state.messages.ATT.time_boot_ms
+                    x = log.messages.ATT.time_boot_ms
                 } catch {
-                    try {
-                        x = this.state.messages.ATTITUDE.time_boot_ms
-                    } catch {
-                        x = this.state.messages.osd.time_boot_ms
-                    }
+                    x = [0]
                 }
             }
-            // used to find the corresponding time indexes between messages
+
             const timeIndexes = new Array(fields.length).fill(0)
             const y = []
             let expression = expression1
-            // eslint-disable-next-line
-            for (let field in fields) {
-                if (isNaN(field)) {
-                    break
-                }
-                // first looks for fields in the expression
-                if (expression.includes(`${fields[field]}.`)) {
-                    expression = expression.replaceAll(`${fields[field]}.`, 'a[' + field + '].')
-                    continue
-                }
-                // fallback to replacing message name instead
-                expression = expression.replaceAll(`${fields[field]}`, 'a[' + field + ']')
+            for (let i = 0; i < fields.length; i++) {
+                const escapedField = fields[i].replace('[', '\\[').replace(']', '\\]')
+                const regex = new RegExp(escapedField + '(\\b|\\.)', 'g')
+                expression = expression.replace(regex, (match) => {
+                    return match.replace(fields[i], 'a[' + i + ']')
+                })
             }
+
             let f
             try {
                 // eslint-disable-next-line
@@ -740,38 +631,33 @@ Std: ${std.toFixed(2)}`
             } catch (e) {
                 return { error: e }
             }
+
             for (const time of x) {
                 const vals = []
-                for (const fieldIndex in timeIndexes) { // array of indexes, one for each field
-                    while (this.state.messages[messages[fieldIndex]].time_boot_ms[timeIndexes[fieldIndex]] < time) {
-                        timeIndexes[fieldIndex] += 1
+                for (let i = 0; i < fields.length; i++) {
+                    const [logIdx, msgName] = this.parseLogIndex(fields[i])
+                    const log = this.state.logs[logIdx]
+                    const msgData = log.messages[msgName]
+                    while (msgData.time_boot_ms[timeIndexes[i]] < time) {
+                        timeIndexes[i] += 1
                     }
                     const newobj = {}
-                    for (const key of Object.keys(this.state.messages[messages[fieldIndex]])) {
-                        newobj[key] = this.state.messages[messages[fieldIndex]][key][timeIndexes[fieldIndex]]
+                    for (const key of Object.keys(msgData)) {
+                        newobj[key] = msgData[key][timeIndexes[i]]
                     }
                     vals.push(newobj)
                 }
                 try {
                     const val = f(vals)
-                    if (!isNumber(val)) {
-                        console.log(val)
-                        throw new Error('Expression does not result in a number')
-                    } else if (val !== null) {
-                        y.push(val)
-                    }
+                    if (val !== null && isNumber(val)) y.push(val)
+                    else if (val === null) y.push(null)
                 } catch (e) {
-                    return { error: e }
+                    y.push(null)
                 }
             }
-            console.log('evaluated ' + expression)
-            const data = this.addGaps({
-                x: x,
-                y: y
-            })
+
+            const data = this.addGaps({ x: x, y: y })
             Vue.set(this.state.plotCache, expression1, data)
-            // this.state.plotCache[expression1] = data
-            console.log('Evaluation took ' + (new Date() - start) + 'ms')
             this.cleanupCache()
             return data
         },
@@ -781,442 +667,58 @@ Std: ${std.toFixed(2)}`
                 const isExpressionInAnyChart = this.state.charts.some(chart =>
                     chart.expressions.some(e => e.name === key)
                 )
-                if (!isExpressionInAnyChart) {
-                    delete this.state.plotCache[key]
-                }
+                if (!isExpressionInAnyChart) delete this.state.plotCache[key]
             }
         },
         addGaps (data) {
-            // Creates artifical gaps in order to break lines in plot when messages are not being received
             const newData = { x: [], y: [], isSwissCheese: false }
             let lastx = data.x[0]
-            const totalPoints = data.x.length
-            let totalGaps = 0
             for (let i = 0; i < data.x.length; i++) {
                 if ((data.x[i] - lastx) > 3000) {
                     newData.x.push(data.x[i] - 1)
                     newData.y.push(null)
-                    totalGaps += 1
                 }
                 newData.x.push(data.x[i])
                 newData.y.push(data.y[i])
                 lastx = data.x[i]
             }
-            if (totalGaps > (totalPoints / 2) || totalPoints < 100) {
-                newData.isSwissCheese = true
-            }
             return newData
         },
         plot () {
-            console.log('plot()')
-            if (this.chart.expressions.length === 0) {
-                console.log('no expressions to plot')
-                return
-            }
-            const currentOptions = JSON.parse(JSON.stringify(plotOptions))
-            currentOptions.title = this.state.file
-            const _this = this
-            const datasets = []
-            const errors = []
+            this.state.plotLoading = true
+            const data = []
+            const layout = JSON.parse(JSON.stringify(plotOptions))
+            layout.xaxis.domain = this.calculateXAxisDomain()
+            layout.xaxis.range = this.state.timeRange || undefined
 
-            for (const expression of this.chart.expressions) {
-                const [canplot, error] = this.expressionCanBePlotted(expression, false)
-                if (!canplot) {
-                    errors.push(error)
-                    this.chart.expressionErrors = errors
-                    return
-                }
-                errors.push(null)
-            }
-            this.chart.expressionErrors = errors
+            for (const field of this.chart.expressions) {
+                const result = this.evaluateExpression(field.name)
+                if (result.error) continue
 
-            let messages = []
-            for (const expression of this.chart.expressions) {
-                messages = [...messages, ...(this.findMessagesInExpression(expression.name).map(message => message[0]))]
-            }
-            if (!this.messagesAreAvailable(messages)) {
-                this.waitForMessages(messages).then(this.plot)
-                    .catch((e) => {
-                        alert(e)
-                        this.plot()
-                    })
-            }
+                const [logIdx] = this.parseLogIndex(field.name)
+                const logNamePrefix = this.state.logs.length > 1 ? `L${logIdx}: ` : ''
 
-            for (const expression of this.chart.expressions) {
-                let data = this.evaluateExpression(expression.name)
-                if ('error' in data) {
-                    this.chart.expressionErrors.push(data.error)
-                    data = { x: 0, y: 0 }
-                } else {
-                    this.chart.expressionErrors.push(null)
-                }
-                console.log(data)
-                const mode = data.isSwissCheese ? 'lines+markers' : 'lines'
-
-                const regularMarker = {
-                    size: 4,
-                    color: expression.color
-                }
-
-                const crossMarker = {
-                    size: 5,
-                    symbol: 'cross-thin',
-                    color: expression.color,
-                    line: {
-                        color: expression.color,
-                        width: 1
-                    }
-                }
-                const marker = data.isSwissCheese ? crossMarker : regularMarker
-                datasets.push({
-                    name: expression.name,
-                    // type: 'scattergl',
-                    mode: mode,
-                    x: data.x,
-                    y: data.y,
-                    yaxis: 'y' + (expression.axis + 1),
-                    line: {
-                        color: expression.color,
-                        width: 1.5
-                    },
-                    marker: marker
+                data.push({
+                    x: result.x,
+                    y: result.y,
+                    name: logNamePrefix + field.name,
+                    yaxis: field.axis === 0 ? 'y' : 'y' + (field.axis + 1),
+                    line: { color: field.color }
                 })
-                const axisname = expression.axis > 0 ? ('yaxis' + (expression.axis + 1)) : 'yaxis'
 
-                if (expression.axis <= 6) {
-                    currentOptions[axisname].title = {
-                        text: this.getAxisTitle(expression.axis),
-                        font: {
-                            color: expression.color
-                        }
-                    }
-                    currentOptions[axisname].tickfont.color = expression.color
-                    /* if (this.state.messageTypes[msgtype].complexFields[msgfield].units !== '?') {
-                         currentOptions[axisname].title.text +=
-                            ' (' + this.state.messageTypes[msgtype].complexFields[msgfield].units + ')'
-                    } */
-                }
+                const axisKey = field.axis === 0 ? 'yaxis' : 'yaxis' + (field.axis + 1)
+                layout[axisKey].title = this.getAxisTitle(field.axis)
             }
-            let start = new Date()
-            console.log('starting plotting itself...')
 
-            const plotData = datasets
-
-            currentOptions.xaxis = {
-                rangeslider: {},
-                domain: this.calculateXAxisDomain(),
-                title: 'time_boot (ms)',
-                tickformat: ':04,2f'
-            }
-            if (this.plotInstance !== null) {
-                currentOptions.xaxis.range = this.gd._fullLayout.xaxis.range
-                Plotly.newPlot(this.gd, plotData, currentOptions, { scrollZoom: true, responsive: true })
-            } else {
-                this.plotInstance = Plotly.newPlot(
-                    this.gd,
-                    plotData,
-                    currentOptions,
-                    {
-                        modeBarButtonsToAdd: [this.csvButton(), this.popupButton()],
-                        scrollZoom: true,
-                        editable: true,
-                        responsive: true
-                    }
-                )
-            }
-            console.log('plotting done in ' + (new Date() - start) + 'ms')
-            start = new Date()
+            Plotly.newPlot(this.gd, data, layout, { responsive: true, displaylogo: false })
             this.gd.on('plotly_relayout', this.onRangeChanged)
-            this.gd.on('plotly_hover', function (data) {
-                const infotext = data.points.map(function (d) {
-                    return d.x
-                })
-                _this.$eventHub.$emit('hoveredTime', infotext[0])
-            })
-
-            this.addModeShapes()
-            this.addEvents()
-            this.addParamChanges()
-
             this.state.plotLoading = false
-
-            const bglayer = document.getElementsByClassName('bglayer')[0]
-            const rect = bglayer.childNodes[0]
-            this.cursor = document.createElementNS('http://www.w3.org/2000/svg', 'line')
-            const x = rect.getAttribute('x')
-            const y = rect.getAttribute('y')
-            const y2 = parseInt(y) + parseInt(rect.getAttribute('height'))
-            this.cursor.setAttribute('id', 'batata')
-            this.cursor.setAttribute('x1', x)
-            this.cursor.setAttribute('y1', y)
-            this.cursor.setAttribute('x2', x)
-            this.cursor.setAttribute('y2', y2)
-            this.cursor.setAttribute('stroke-width', 1)
-            this.cursor.setAttribute('stroke', 'black')
-            bglayer.append(this.cursor)
-            console.log('layout done in ' + (new Date() - start) + 'ms')
-        },
-        setCursorTime (time) {
-            console.log('master got hover event at ' + time + 'ms')
-            try {
-                const bglayer = document.getElementsByClassName('bglayer')[0]
-                const rect = bglayer.childNodes[0]
-                const x = parseInt(rect.getAttribute('x'))
-                const width = parseInt(rect.getAttribute('width'))
-                const percTime = (time - this.gd.layout.xaxis.range[0]) /
-                    (this.gd.layout.xaxis.range[1] - this.gd.layout.xaxis.range[0])
-                const newx = x + width * percTime
-                this.cursor.setAttribute('x1', newx)
-                this.cursor.setAttribute('x2', newx)
-            } catch (err) {
-                console.log(err)
-            }
-        },
-        getMode (time) {
-            for (const mode in this.state.flightModeChanges) {
-                if (this.state.flightModeChanges[mode][0] > time) {
-                    if (mode - 1 < 0) {
-                        return this.state.flightModeChanges[0][1]
-                    }
-                    return this.state.flightModeChanges[mode - 1][1]
-                }
-            }
-            return this.state.flightModeChanges[this.state.flightModeChanges.length - 1][1]
-        },
-        getModeColor (time) {
-            return this.state.cssColors[this.setOfModes.indexOf(this.getMode(time))]
-        },
-        darker (color) {
-            return Color(color).darken(0.2).string()
-        },
-        addModeShapes () {
-            const shapes = []
-            const modeChanges = [...this.state.flightModeChanges]
-            modeChanges.push([this.gd.layout.xaxis.range[1], null])
-
-            for (let i = 0; i < modeChanges.length - 1; i++) {
-                shapes.push(
-                    {
-                        type: 'rect',
-                        // x-reference is assigned to the x-values
-                        xref: 'x',
-                        // y-reference is assigned to the plot paper [0,1]
-                        yref: 'paper',
-                        x0: modeChanges[i][0],
-                        y0: 0,
-                        x1: modeChanges[i + 1][0],
-                        y1: 1,
-                        fillcolor: this.getModeColor(modeChanges[i][0] + 1),
-                        opacity: 0.15,
-                        line: {
-                            width: 0
-                        }
-                    }
-                )
-            }
-            Plotly.relayout(this.gd, {
-                shapes: shapes
-            })
-        },
-        addEvents () {
-            annotationsEvents = []
-            let i = -300
-            for (const event of this.state.events) {
-                annotationsEvents.push(
-                    {
-                        xref: 'x',
-                        yref: 'paper',
-                        x: event[0],
-                        y: 0,
-                        yanchor: 'bottom',
-                        text: event[1].toLowerCase(),
-                        showarrow: true,
-                        arrowwidth: 1,
-                        arrowcolor: '#999999',
-                        ay: i,
-                        ax: 0
-                    }
-                )
-                i += 23
-                if (i > 0) {
-                    i = -300
-                }
-            }
-            const modeChanges = [...this.state.flightModeChanges]
-            modeChanges.push([this.gd.layout.xaxis.range[1], null])
-            for (let i = 0; i < modeChanges.length - 1; i++) {
-                annotationsModes.push(
-                    {
-                        xref: 'x',
-                        // y-reference is assigned to the plot paper [0,1]
-                        yref: 'paper',
-                        x: modeChanges[i][0],
-                        xanchor: 'left',
-                        y: 0,
-                        textangle: 90,
-                        text: '<b>' + modeChanges[i][1] + '</b>',
-                        showarrow: false,
-                        font: {
-                            color: this.darker(this.getModeColor(modeChanges[i][0] + 1))
-                        },
-                        opacity: 1
-                    }
-                )
-            }
-            Plotly.relayout(this.gd, {
-                annotations: annotationsModes,
-                updatemenus: updatemenus
-            })
-            updatemenus[0].buttons[0].args = ['annotations', annotationsModes]
-            updatemenus[0].buttons[1].args = ['annotations', [...annotationsEvents, ...annotationsModes]]
-            updatemenus[0].buttons[2].args = ['annotations', [...annotationsEvents, ...annotationsModes,
-                ...annotationsParams]]
-        },
-        addParamChanges () {
-            if (!this.state.params) {
-                return
-            }
-            let i = -300
-            annotationsParams = []
-            const firstFetch = new Set()
-            let startAt = null
-            for (const change of this.state.params.changeArray) {
-                if (!firstFetch.has(change[1])) {
-                    firstFetch.add(change[1])
-                } else {
-                    startAt = change[0]
-                    break
-                }
-            }
-            let last = [0, 0]
-            for (const change of this.state.params.changeArray) {
-                if (change[0] < startAt) {
-                    continue
-                }
-                // This takes care of repeated param changed logs we get for some reason
-                if (change[2] === last[2] && change[1] === last[1]) {
-                    continue
-                }
-                // Filter some "noisy" parameters
-                if (['STAT_FLTTIME', 'STAT_RUNTIME'].includes(change[1])) {
-                    continue
-                }
-                last = change
-                annotationsParams.push(
-                    {
-                        xref: 'x',
-                        yref: 'paper',
-                        x: change[0],
-                        y: 0,
-                        yanchor: 'bottom',
-                        text: change[1] + '->' + change[2].toFixed(4),
-                        showarrow: true,
-                        arrowwidth: 1,
-                        arrowcolor: '#999999',
-                        ay: i,
-                        ax: 0
-                    }
-                )
-                i += 23
-                if (i > 0) {
-                    i = -300
-                }
-            }
-            updatemenus[0].active = 0
-            Plotly.relayout(this.gd, {
-                annotations:
-                [
-                    ...annotationsModes
-                ],
-                updatemenus: updatemenus
-            })
-            updatemenus[0].buttons[2].args =
-            [
-                'annotations',
-                [
-                    ...annotationsEvents,
-                    ...annotationsModes,
-                    ...annotationsParams
-                ]
-            ]
-        },
-        loadedMessages () {
-            return Object.keys(this.state.messages)
         }
     },
     computed: {
         chart () {
             return this.state.charts[this.chartIndex]
-        },
-        setOfModes () {
-            const set = []
-            for (const mode of this.state.flightModeChanges) {
-                if (!set.includes(mode[1])) {
-                    set.push(mode[1])
-                }
-            }
-            return set
-        },
-        timeRange () {
-            if (this.state.timeRange != null) {
-                return this.state.timeRange
-            }
-            return undefined
-        },
-        expressions () {
-            return this.chart.expressions
-        },
-        messagesInLog () {
-            return Object.keys(this.state.messageTypes)
-        }
-    },
-    watch: {
-        timeRange (range) {
-            if (!this.state.syncZoom) {
-                return range
-            }
-
-            // Check if range is already set to avoid unnecessary relayout
-            if (this.gd && this.gd.layout && this.gd.layout.xaxis && this.gd.layout.xaxis.range) {
-                const currentRange = this.gd.layout.xaxis.range
-                if (range &&
-                    Math.abs(currentRange[0] - range[0]) < 0.001 &&
-                    Math.abs(currentRange[1] - range[1]) < 0.001) {
-                    return range
-                }
-            }
-
-            if (this.zoomInterval !== null) {
-                clearTimeout(this.zoomInterval)
-            }
-            this.updatChildrenTimeRange(this.state.timeRange)
-            this.zoomInterval = setTimeout(() => {
-                // Use property paths to avoid resetting other xaxis properties (like rangeslider state)
-                // which might be causing issues with image saving/exporting.
-                const update = {
-                    'xaxis.range': range,
-                    'xaxis.domain': this.calculateXAxisDomain()
-                }
-                Plotly.relayout(this.gd, update)
-            }, 500)
-            return range
-        },
-        expressions: {
-            deep: true,
-            handler () {
-                this.plot()
-            }
         }
     }
 }
-
 </script>
-<style>
-    .js-plotly-plot {
-        margin-left: 0 !important;
-    }
-
-    .shapelayer path {
-        pointer-events: none !important;
-    }
-</style>
