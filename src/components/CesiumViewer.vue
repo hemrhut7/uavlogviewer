@@ -253,15 +253,15 @@ export default {
                 this.addFitContentsButton()
                 this.addCloseButton()
 
+                this.correctedTrajectory = []
                 for (const pos of this.state.currentTrajectory) {
                     this.correctedTrajectory.push(Cartographic.fromDegrees(pos[0], pos[1], pos[2]))
                 }
-
-                this.setup2(this.correctedTrajectory)
+                await this.setup2(this.correctedTrajectory)
             } catch (e) {
                 console.error('Cesium asyncSetup failed:', e)
-                this.state.mapLoading = false
             } finally {
+                this.state.mapLoading = false
                 clearTimeout(failsafe)
             }
         },
@@ -417,7 +417,9 @@ export default {
             this.state.trajectorySource = this.state.trajectorySources[0]
             this.loadTrajectory(this.state.trajectorySource)
             this.state.heightOffset = 0
-            this.state.heightOffset = updatedPositions[0].height
+            if (updatedPositions && updatedPositions.length > 0) {
+                this.state.heightOffset = updatedPositions[0].height
+            }
             this.processTrajectory(this.state.currentTrajectory)
             this.addModel()
             this.updateAndPlotTrajectory()
@@ -450,7 +452,7 @@ export default {
                             this.viewer.camera.direction = direction
                         } */
             // TODO: Find a better way to know that cesium finished loading
-            setTimeout(() => { this.state.mapLoading = false }, 2000)
+            this.state.mapLoading = false
             this.state.cameraType = 'follow'
             this.changeCamera()
             setTimeout(this.updateTimelineColors, 500)
@@ -819,6 +821,11 @@ export default {
 
         processTrajectory () {
             this.correctedTrajectory = []
+            if (!this.state.trajectories || !this.state.trajectorySource ||
+                !this.state.trajectories[this.state.trajectorySource]) {
+                console.warn('Trajectory data not available yet')
+                return
+            }
             this.points = this.state.trajectories[this.state.trajectorySource].trajectory
             for (const pos of this.points) {
                 this.correctedTrajectory.push(Cartographic.fromDegrees(pos[0], pos[1], pos[2]))

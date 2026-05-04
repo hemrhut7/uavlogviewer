@@ -185,9 +185,6 @@ export default {
                 console.log('unable to load named floats')
                 console.log(error)
             }
-            Vue.delete(log.messages, 'AHR2')
-            Vue.delete(log.messages, 'POS')
-            Vue.delete(log.messages, 'GPS')
 
             log.fences = extractor.extractFences(log.messages)
 
@@ -199,6 +196,7 @@ export default {
             this.state.messages = log.messages
             this.state.messageTypes = log.messageTypes
             this.state.currentTrajectory = log.currentTrajectory || []
+            this.state.trajectories = log.trajectories || {}
             this.state.flightModeChanges = log.flightModeChanges
             this.state.trajectorySources = log.trajectorySources
             this.state.attitudeSources = log.attitudeSources
@@ -232,6 +230,25 @@ export default {
             this.state.colors = []
             for (const rgba of colormap(colorMapOptions)) {
                 this.state.colors.push(new Color(rgba[0], rgba[1], rgba[2]))
+            }
+        }
+    },
+    watch: {
+        'state.activeLogIndex': {
+            handler (newIndex) {
+                const log = this.state.logs[newIndex]
+                if (log && log.processDone) {
+                    this.state.file = log.filename
+                    this.state.messages = log.messages
+                    this.state.messageTypes = log.messageTypes
+                    this.state.currentTrajectory = log.currentTrajectory || []
+                    this.state.trajectories = log.trajectories || {}
+                    this.state.flightModeChanges = log.flightModeChanges
+                    this.state.trajectorySources = log.trajectorySources
+                    this.state.attitudeSources = log.attitudeSources
+                    this.state.processDone = true
+                    this.state.processStatus = 'Processed!'
+                }
             }
         }
     },

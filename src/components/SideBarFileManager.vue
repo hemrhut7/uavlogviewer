@@ -121,7 +121,7 @@ export default {
                 } else if (event.data.messagesDoneLoading) {
                     this.$eventHub.$emit('messagesDoneLoading', logIndex)
                 } else if (event.data.messageType) {
-                    log.messages[event.data.messageType] = event.data.messageList
+                    this.$set(log.messages, event.data.messageType, event.data.messageList)
                     this.$eventHub.$emit('messages', logIndex)
                 } else if (event.data.files) {
                     log.files = event.data.files
@@ -222,7 +222,7 @@ export default {
                 } else if (event.data.messagesDoneLoading) {
                     this.$eventHub.$emit('messagesDoneLoading', logIndex)
                 } else if (event.data.messageType) {
-                    log.messages[event.data.messageType] = event.data.messageList
+                    this.$set(log.messages, event.data.messageType, event.data.messageList)
                     this.$eventHub.$emit('messages', logIndex)
                 } else if (event.data.files) {
                     log.files = event.data.files
