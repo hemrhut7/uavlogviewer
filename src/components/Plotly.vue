@@ -709,8 +709,12 @@ Std: ${std.toFixed(2)}`
                 const axisKey = field.axis === 0 ? 'yaxis' : 'yaxis' + (field.axis + 1)
                 layout[axisKey].title = this.getAxisTitle(field.axis)
             }
-
-            Plotly.newPlot(this.gd, data, layout, { responsive: true, displaylogo: false })
+            Plotly.newPlot(this.gd, data, layout, {
+                scrollZoom: true,
+                responsive: true,
+                displaylogo: false,
+                modeBarButtonsToAdd: [this.csvButton(), this.popupButton()]
+            })
             this.gd.on('plotly_relayout', this.onRangeChanged)
             this.state.plotLoading = false
         }

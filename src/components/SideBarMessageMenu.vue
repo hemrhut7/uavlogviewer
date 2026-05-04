@@ -24,9 +24,14 @@
                 <input id="filterbox" placeholder=" Type here to filter..." v-model="filter">
             </li>
             <div v-for="(log, logIdx) in state.logs" :key="'log-messages-' + logIdx" class="log-messages-group">
-                <div class="log-header" v-if="state.logs.length > 1">
+                <div
+                    class="log-header type"
+                    @click="toggleLog(logIdx)"
+                    style="cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
                     <i class="fas fa-file-alt"></i> {{ log.filename }}
+                    <i class="expand fas" :class="(logVisible[logIdx] !== false) ? 'fa-caret-up' : 'fa-caret-down'"></i>
                 </div>
+                <b-collapse :visible="logVisible[logIdx] !== false">
                 <template v-for="key of Object.keys(logMessageTypesFiltered(logIdx)).sort()">
                     <li class="type" v-bind:key="logIdx + '-' + key">
                         <div
@@ -41,7 +46,10 @@
                             </a>
                         </div>
                     </li>
-                    <b-collapse :id="'type' + logIdx + '-' + key" v-bind:key="logIdx + '-' + key + '1'">
+                    <b-collapse
+                        :id="'type' + logIdx + '-' + key"
+                        v-bind:key="logIdx + '-' + key + '1'"
+                        v-model="expandedTypes[logIdx + '-' + key]">
                         <template v-for="item in log.messageTypes[key].complexFields">
                             <li @click="toggle(logIdx, key, item.name, 0)"
                                 class="field"
@@ -78,6 +86,7 @@
                         </template>
                     </b-collapse>
                 </template>
+                </b-collapse>
             </div>
         </b-collapse>
     </div>
@@ -95,6 +104,8 @@ export default {
         return {
             filter: '',
             checkboxes: {},
+            expandedTypes: {},
+            logVisible: {},
             state: store,
             messages: {},
             messageTypes: [],
@@ -131,6 +142,14 @@ export default {
         this.$eventHub.$off('messageTypes')
     },
     methods: {
+        toggleLog (logIdx) {
+            if (this.logVisible[logIdx] === undefined) {
+                this.$set(this.logVisible, logIdx, false)
+            } else {
+                this.$set(this.logVisible, logIdx, !this.logVisible[logIdx])
+            }
+        },
+
         loadXmlPresets () {
             // eslint-disable-next-line
             const graphs = {}
@@ -275,6 +294,7 @@ export default {
         }
     },
     computed: {
+
         hasMessages () {
             return this.state.logs.some(log => log.messageTypes && Object.keys(log.messageTypes).length > 0)
         },
