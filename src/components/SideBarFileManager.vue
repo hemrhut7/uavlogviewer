@@ -34,10 +34,7 @@ import { store } from './Globals'
 
 import { MAVLink20Processor as MAVLink } from '../libs/mavlink'
 
-const worker = new Worker()
-
-worker.addEventListener('message', function (event) {
-})
+// The global worker is removed in favor of per-log workers stored in this.state.logs
 
 export default {
     name: 'Dropzone',
@@ -64,7 +61,10 @@ export default {
     },
     methods: {
         trimFile () {
-            worker.postMessage({ action: 'trimFile', time: this.state.timeRange })
+            const log = this.state.logs[this.state.activeLogIndex]
+            if (log && log.worker) {
+                log.worker.postMessage({ action: 'trimFile', time: this.state.timeRange })
+            }
         },
         onLoadSample (file) {
             let url
@@ -105,6 +105,7 @@ export default {
             oReq.responseType = 'arraybuffer'
 
             const logWorker = new Worker()
+            logEntry.worker = logWorker
             logWorker.onmessage = (event) => {
                 const log = this.state.logs[logIndex]
                 if (event.data.percentage) {
@@ -183,10 +184,25 @@ export default {
             }
         },
         loadType: function (type) {
-            worker.postMessage({
-                action: 'loadType',
-                type: type
-            })
+            let logIdx = 0
+            let msgName = type
+
+            // Parse log index prefix, e.g., [1]ARSP[0]
+            const match = type.match(/^\[(?<index>[0-9]+)\](?<message>.+)$/)
+            if (match) {
+                logIdx = parseInt(match.groups.index)
+                msgName = match.groups.message
+            }
+
+            const log = this.state.logs[logIdx]
+            if (log && log.worker) {
+                log.worker.postMessage({
+                    action: 'loadType',
+                    type: msgName
+                })
+            } else {
+                console.warn(`Could not load type ${type}: log ${logIdx} or its worker not found`)
+            }
         },
         process: function (file) {
             const logEntry = {
@@ -206,6 +222,7 @@ export default {
             this.state.activeLogIndex = logIndex
 
             const logWorker = new Worker()
+            logEntry.worker = logWorker
             logWorker.onmessage = (event) => {
                 const log = this.state.logs[logIndex]
                 if (event.data.percentage) {
@@ -307,7 +324,35 @@ export default {
     mounted () {
         window.addEventListener('message', (event) => {
             if (event.data.type === 'arrayBuffer') {
-                worker.postMessage({
+                const logEntry = {
+                    filename: 'external_log',
+                    processStatus: 'Pre-processing...',
+                    processPercentage: 100,
+                    messages: {},
+                    messageTypes: {},
+                    metadata: null,
+                    logType: 'bin'
+                }
+                this.state.logs.push(logEntry)
+                const logIndex = this.state.logs.length - 1
+                const logWorker = new Worker()
+                logEntry.worker = logWorker
+                logWorker.onmessage = (workerEvent) => {
+                    const log = this.state.logs[logIndex]
+                    if (workerEvent.data.percentage) {
+                        log.processPercentage = workerEvent.data.percentage
+                    } else if (workerEvent.data.availableMessages) {
+                        log.messageTypes = workerEvent.data.availableMessages
+                        this.$eventHub.$emit('messageTypes', workerEvent.data.availableMessages, logIndex)
+                    } else if (workerEvent.data.messages) {
+                        log.messages = workerEvent.data.messages
+                        this.$eventHub.$emit('messages', logIndex)
+                    } else if (workerEvent.data.messageType) {
+                        this.$set(log.messages, workerEvent.data.messageType, workerEvent.data.messageList)
+                        this.$eventHub.$emit('messages', logIndex)
+                    }
+                }
+                logWorker.postMessage({
                     action: 'parse',
                     file: event.data.data,
                     isTlog: false,
@@ -315,28 +360,6 @@ export default {
                 })
             }
         })
-        worker.onmessage = (event) => {
-            if (event.data.percentage) {
-                this.state.processPercentage = event.data.percentage
-            } else if (event.data.availableMessages) {
-                this.$eventHub.$emit('messageTypes', event.data.availableMessages)
-            } else if (event.data.metadata) {
-                this.state.metadata = event.data.metadata
-            } else if (event.data.messages) {
-                this.state.messages = event.data.messages
-                this.$eventHub.$emit('messages')
-            } else if (event.data.messagesDoneLoading) {
-                this.$eventHub.$emit('messagesDoneLoading')
-            } else if (event.data.messageType) {
-                this.state.messages[event.data.messageType] = event.data.messageList
-                this.$eventHub.$emit('messages')
-            } else if (event.data.files) {
-                this.state.files = event.data.files
-                this.$eventHub.$emit('messages')
-            } else if (event.data.url) {
-                this.downloadFileFromURL(event.data.url)
-            }
-        }
         const url = document.location.search.split('?file=')[1]
         if (url) {
             this.onLoadSample(decodeURIComponent(url))

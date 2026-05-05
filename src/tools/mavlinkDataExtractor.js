@@ -138,6 +138,13 @@ export class MavlinkDataExtractor {
 
     static extractTrajectory (messages, source) {
         const ret = {}
+        if (source === undefined) {
+            const sources = this.extractTrajectorySources(messages)
+            for (const s of sources) {
+                Object.assign(ret, this.extractTrajectory(messages, s))
+            }
+            return ret
+        }
         if (('GLOBAL_POSITION_INT' in messages) && source === 'GLOBAL_POSITION_INT') {
             const trajectory = []
             const timeTrajectory = {}

@@ -698,6 +698,9 @@ Std: ${std.toFixed(2)}`
                 const [logIdx] = this.parseLogIndex(field.name)
                 const logNamePrefix = this.state.logs.length > 1 ? `L${logIdx}: ` : ''
 
+                if (result.error) {
+                    continue
+                }
                 data.push({
                     x: result.x,
                     y: result.y,

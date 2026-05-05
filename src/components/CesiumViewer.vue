@@ -462,16 +462,25 @@ export default {
             }, 1000)
         },
         async waitForMessages (messages) {
+            const logIdx = this.state.activeLogIndex
+            const prefix = logIdx === 0 ? '' : `[${logIdx}]`
+
             for (const message of messages) {
-                this.$eventHub.$emit('loadType', message)
+                this.$eventHub.$emit('loadType', prefix + message)
             }
             let interval
             const _this = this
             let counter = 0
             return new Promise((resolve, reject) => {
                 interval = setInterval(function () {
+                    const log = _this.state.logs[logIdx]
+                    if (!log) {
+                        clearInterval(interval)
+                        reject(new Error(`Log ${logIdx} not found`))
+                        return
+                    }
                     for (const message of messages) {
-                        if (!_this.state.messages[message]) {
+                        if (!log.messages[message]) {
                             counter += 1
                             if (counter > 30) { // 30 * 300ms = 9 s timeout
                                 console.log('not resolving')
