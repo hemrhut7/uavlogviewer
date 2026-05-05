@@ -27,7 +27,7 @@ const plotOptions = {
     // autosize: true,
     margin: { t: 20, l: 0, b: 30, r: 10 },
     xaxis: {
-        title: 'Time since boot',
+        title: 'time',
         domain: [0.15, 0.85],
         rangeslider: {},
         tickformat: timeformat
@@ -684,6 +684,15 @@ Std: ${std.toFixed(2)}`
             }
             return newData
         },
+        getLogStartTime (log) {
+            let minTime = Infinity
+            for (const msgName of Object.keys(log.messages)) {
+                if (log.messages[msgName].time_boot_ms && log.messages[msgName].time_boot_ms.length > 0) {
+                    minTime = Math.min(minTime, log.messages[msgName].time_boot_ms[0])
+                }
+            }
+            return minTime === Infinity ? 0 : minTime
+        },
         plot () {
             this.state.plotLoading = true
             const data = []
@@ -696,13 +705,16 @@ Std: ${std.toFixed(2)}`
                 if (result.error) continue
 
                 const [logIdx] = this.parseLogIndex(field.name)
+                const log = this.state.logs[logIdx]
                 const logNamePrefix = this.state.logs.length > 1 ? `L${logIdx}: ` : ''
 
-                if (result.error) {
-                    continue
-                }
+                const initialN = this.getLogStartTime(log)
+                const initial0 = this.state.logs.length > 0 ? this.getLogStartTime(this.state.logs[0]) : 0
+                const offsetN = log.offset || 0
+                const adjustedX = result.x.map(val => val - initialN + initial0 + offsetN * 1000)
+
                 data.push({
-                    x: result.x,
+                    x: adjustedX,
                     y: result.y,
                     name: logNamePrefix + field.name,
                     yaxis: field.axis === 0 ? 'y' : 'y' + (field.axis + 1),

@@ -31,6 +31,29 @@
                     <i class="fas fa-file-alt"></i> {{ log.filename }}
                     <i class="expand fas" :class="(logVisible[logIdx] !== false) ? 'fa-caret-up' : 'fa-caret-down'"></i>
                 </div>
+                <div
+                    v-if="logVisible[logIdx] !== false"
+                    class="log-offset-control"
+                    style="padding: 10px; background: rgba(0,0,0,0.1); border-bottom: 1px solid rgba(255,255,255,0.05);"
+                >
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;"
+                    >
+                        <span style="font-size: 11px; color: #aaa;">Align Offset:</span>
+                        <span style="font-size: 11px; color: #64e9ff; font-family: monospace;">
+                            {{ (log.offset || 0).toFixed(1) }}s
+                        </span>
+                    </div>
+                    <input
+                        type="range"
+                        min="-300"
+                        max="300"
+                        step="0.1"
+                        v-model.number="log.offset"
+                        @input="onOffsetChange"
+                        style="width: 100%; height: 4px; margin: 0; cursor: pointer;"
+                    >
+                </div>
                 <b-collapse :visible="logVisible[logIdx] !== false">
                 <template v-for="key of Object.keys(logMessageTypesFiltered(logIdx)).sort()">
                     <li class="type" v-bind:key="logIdx + '-' + key">
@@ -148,6 +171,9 @@ export default {
             } else {
                 this.$set(this.logVisible, logIdx, !this.logVisible[logIdx])
             }
+        },
+        onOffsetChange () {
+            this.$eventHub.$emit('recalc-plots')
         },
 
         loadXmlPresets () {
