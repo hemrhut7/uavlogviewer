@@ -51,6 +51,7 @@
                         step="0.1"
                         v-model.number="log.offset"
                         @input="onOffsetChange"
+                        @wheel.prevent="onWheel($event, logIdx)"
                         style="width: 100%; height: 4px; margin: 0; cursor: pointer;"
                     >
                 </div>
@@ -174,6 +175,17 @@ export default {
         },
         onOffsetChange () {
             this.$eventHub.$emit('recalc-plots')
+        },
+        onWheel (event, logIdx) {
+            const log = this.state.logs[logIdx]
+            const delta = event.deltaY < 0 ? 0.1 : -0.1
+            let newOffset = (log.offset || 0) + delta
+
+            // Clamp and fix precision
+            newOffset = Math.max(-300, Math.min(300, newOffset))
+            this.$set(log, 'offset', parseFloat(newOffset.toFixed(1)))
+
+            this.onOffsetChange()
         },
 
         loadXmlPresets () {
