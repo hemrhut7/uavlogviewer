@@ -12,6 +12,7 @@
         <b-collapse class="menu-content collapse out" id="menucontent" visible>
             <span v-if="state.logs.length > 0" class="filename">
                 Loaded logs: {{state.logs.length}}
+                <i class="fas fa-plus add-log-btn" @click="appendLogs" title="Add more logs"></i>
             </span>
             <div class="tabholder">
                 <!-- Home -->
@@ -34,7 +35,7 @@
                     <plotSetup/>
                     <message-menu/>
                 </div>
-                <div v-if="selected==='home'">
+                <div v-show="selected==='home'">
                     <Dropzone/>
                     <div v-if="state.logs.length > 0" class="loaded-logs">
                         <span class="section-title">Loaded Logs</span>
@@ -166,6 +167,12 @@ export default {
         setSelected (selected) {
             this.selected = selected
         },
+        appendLogs () {
+            const input = document.getElementById('choosefile')
+            if (input) {
+                input.click()
+            }
+        },
 
         startCapture (displayMediaOptions) {
             navigator.mediaDevices.getDisplayMedia({video: { mediaSource: 'screen' }})
@@ -256,6 +263,16 @@ export default {
        a {
         padding: 2px 60px 2px 55px !important;
        }
+    }
+    .add-log-btn {
+        margin-left: 10px;
+        cursor: pointer;
+        color: #64e9ff;
+        font-size: 0.9em;
+        transition: transform 0.2s;
+    }
+    .add-log-btn:hover {
+        transform: scale(1.2);
     }
 </style>
 
