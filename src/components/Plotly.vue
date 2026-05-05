@@ -121,6 +121,7 @@ export default {
         this.$eventHub.$on('hoveredTime', this.setCursorTime)
         this.$eventHub.$on('force-resize-plotly', this.resize)
         this.$eventHub.$on('child-zoomed', this.onTimeRangeChanged)
+        this.$eventHub.$on('sync-zoom', this.syncTimeRange)
         this.$eventHub.$on('recalc-stats', this.addMaxMinMeanToTitles)
         this.$eventHub.$on('recalc-plots', this.plot)
         this.zoomInterval = null
@@ -177,6 +178,7 @@ export default {
         this.$eventHub.$off('hoveredTime', this.setCursorTime)
         this.$eventHub.$off('force-resize-plotly', this.resize)
         this.$eventHub.$off('child-zoomed', this.onTimeRangeChanged)
+        this.$eventHub.$off('sync-zoom', this.syncTimeRange)
         this.$eventHub.$off('recalc-stats', this.addMaxMinMeanToTitles)
         this.$eventHub.$off('recalc-plots', this.plot)
         this.$eventHub.$off('addPlots', this.addPlots)
@@ -195,7 +197,8 @@ export default {
         return {
             gd: null,
             plotInstance: null,
-            state: store
+            state: store,
+            isSyncing: false
         }
     },
     methods: {
@@ -331,26 +334,45 @@ export default {
             })
         },
         onRangeChanged (event) {
+            if (this.isSyncing) return
             this.addMaxMinMeanToTitles()
             if (event !== undefined && this.state.syncZoom) {
+                let newRange = null
                 if (event['xaxis.range']) {
-                    this.state.timeRange = event['xaxis.range']
-                    this.updatChildrenTimeRange(this.state.timeRange)
+                    newRange = event['xaxis.range']
+                } else if (event['xaxis.range[0]']) {
+                    newRange = [event['xaxis.range[0]'], event['xaxis.range[1]']]
+                } else if (event['xaxis.autorange']) {
+                    newRange = [this.gd.layout.xaxis.range[0], this.gd.layout.xaxis.range[1]]
                 }
-                if (event['xaxis.range[0]']) {
-                    this.state.timeRange = [event['xaxis.range[0]'], event['xaxis.range[1]']]
-                    this.updatChildrenTimeRange(this.state.timeRange)
+
+                if (newRange) {
+                    this.state.timeRange = newRange
+                    this.updatChildrenTimeRange(newRange)
+                    this.$eventHub.$emit('sync-zoom', newRange, this.chartIndex)
                 }
-                if (event['xaxis.autorange']) {
-                    this.state.timeRange = [this.gd.layout.xaxis.range[0], this.gd.layout.xaxis.range[1]]
-                    this.updatChildrenTimeRange(this.state.timeRange)
-                }
+            }
+        },
+        syncTimeRange (timeRange, sourceIndex) {
+            if (this.state.syncZoom && sourceIndex !== this.chartIndex) {
+                this.isSyncing = true
+                Plotly.relayout(this.gd, { 'xaxis.range': timeRange }).then(() => {
+                    this.isSyncing = false
+                }).catch(() => {
+                    this.isSyncing = false
+                })
             }
         },
 
         onTimeRangeChanged (timeRange) {
             this.state.timeRange = timeRange
-            this.updatChildrenTimeRange(this.state.timeRange)
+            this.updatChildrenTimeRange(timeRange)
+            this.isSyncing = true
+            Plotly.relayout(this.gd, { 'xaxis.range': timeRange }).then(() => {
+                this.isSyncing = false
+            }).catch(() => {
+                this.isSyncing = false
+            })
         },
         updatChildrenTimeRange (timeRange) {
             for (const child of this.state.childPlots) {
