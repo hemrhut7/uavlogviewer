@@ -312,12 +312,15 @@ export class MavlinkDataExtractor {
 
     static extractTextMessages (messages) {
         const texts = []
-        if ('STATUSTEXT' in messages) {
-            const textMsgs = messages.STATUSTEXT
-            for (const i in textMsgs.time_boot_ms) {
-                texts.push([textMsgs.time_boot_ms[i], textMsgs.severity[i], textMsgs.text[i]])
+        for (const key of Object.keys(messages)) {
+            if (key === 'STATUSTEXT' || key.startsWith('STATUSTEXT[')) {
+                const textMsgs = messages[key]
+                for (const i in textMsgs.time_boot_ms) {
+                    texts.push([textMsgs.time_boot_ms[i], textMsgs.severity[i], textMsgs.text[i]])
+                }
             }
         }
+        texts.sort((a, b) => a[0] - b[0])
         return texts
     }
 
