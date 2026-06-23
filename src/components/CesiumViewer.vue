@@ -93,12 +93,12 @@ const colorCoderRange = new ColorCoderRange(store)
 
 function getMinTime (data) {
     // returns the minimum time in the array. Used to define the time range
-    return data.reduce((min, p) => p[3] < min ? p[3] : min, data[0][3])
+    return data.reduce((min, p) => (!isNaN(p[3]) && (isNaN(min) || p[3] < min)) ? p[3] : min, data[0][3])
 }
 
 function getMaxTime (data) {
     // returns the maximum time in   the array. Used to define the time range
-    return data.reduce((max, p) => p[3] > max ? p[3] : max, data[0][3])
+    return data.reduce((max, p) => (!isNaN(p[3]) && (isNaN(max) || p[3] > max)) ? p[3] : max, data[0][3])
 }
 
 export default {
@@ -125,13 +125,27 @@ export default {
         this.trajectory = null // GPS trajectory (in degrees)
         this.correctedTrajectory = [] // GPS trajectory (Cartographic array)
 
+        this.lastConnectionMode = this.state.mapConnectionMode
         // Link time with plot updates
         this.$eventHub.$on('hoveredTime', this.showAttitude)
-        // This fires up the loading spinner
-        this.state.mapLoading = true
+
+        this.$watch('state.mapConnectionMode', () => {
+            console.log('Map connection mode changed, re-initializing...')
+            this.asyncSetup()
+        })
+
+        this.onNetworkChange = () => {
+            console.log('Network status changed:', navigator.onLine)
+            this.state.mapConnectionMode = navigator.onLine ? 'online' : 'offline'
+        }
+        window.addEventListener('online', this.onNetworkChange)
+        window.addEventListener('offline', this.onNetworkChange)
     },
     beforeDestroy () {
+        window.removeEventListener('online', this.onNetworkChange)
+        window.removeEventListener('offline', this.onNetworkChange)
         this.$eventHub.$off('hoveredTime')
+        this.state.mapLoading = false
     },
     mounted () {
         // create eniro, statkart, and openseamap providers
@@ -139,88 +153,117 @@ export default {
     },
     methods: {
         async asyncSetup () {
-            if (this.viewer == null) {
-                this.viewer = this.createViewer(false)
-                this.viewer.scene.debugShowFramesPerSecond = true
+            this.state.mapLoading = true
+            // Failsafe: clear loading state after 10 seconds
+            const failsafe = setTimeout(() => {
+                this.state.mapLoading = false
+            }, 10000)
 
-                this.viewer.scene.postProcessStages.ambientOcclusion.enabled = false
-                this.viewer.scene.postProcessStages.bloom.enabled = false
-                this.clickableTrajectory = this.viewer.scene.primitives.add(new PointPrimitiveCollection())
-                this.trajectory = this.viewer.entities.add(new Entity())
-                this.trajectoryUpdateTimeout = null
-                this.viewer.scene.globe.enableLighting = true
-                this.viewer.scene.postRender.addEventListener(this.onFrameUpdate)
-                this.viewer.scene.postRender.addEventListener(this.onFrameUpdate)
-                this.viewer.scene.morphComplete.addEventListener(
-                    () => {
-                        this.viewer.zoomTo(this.viewer.entities)
-                    })
-                this.viewer.animation.viewModel.setShuttleRingTicks([0.1, 0.25, 0.5, 0.75, 1, 2, 5, 10, 15])
-                this.viewer.scene.globe.depthTestAgainstTerrain = true
-                this.viewer.shadowMap.maxmimumDistance = 10000.0
-                this.viewer.shadowMap.softShadows = true
-                this.viewer.shadowMap.size = 4096
-                this.viewer.animation.viewModel.timeFormatter = (date, _viewModel) => {
-                    const isoString = JulianDate.toIso8601(date)
-                    let dateTime = DateTime.fromISO(isoString)
-                    // get zone from current cesium location
-                    const cameraPosition = this.viewer.camera.positionCartographic
-                    const longitude = cameraPosition.longitude * 180 / Math.PI
-                    const latitude = cameraPosition.latitude * 180 / Math.PI
+            try {
+                if (this.viewer == null || (this.lastConnectionMode !== this.state.mapConnectionMode)) {
+                    if (this.viewer) {
+                        this.viewer.destroy()
+                        this.viewer = null
+                        // Clear reference to old toolbar buttons etc
+                        const toolbar = document.getElementsByClassName('cesium-viewer-toolbar')[0]
+                        if (toolbar) {
+                            toolbar.innerHTML = ''
+                        }
+                    }
+                    this.lastConnectionMode = this.state.mapConnectionMode
+                    const isOnline = this.state.mapConnectionMode === 'online'
+                    this.viewer = this.createViewer(isOnline)
+                    this.viewer.scene.debugShowFramesPerSecond = true
 
-                    const timezone = tzlookup(latitude, longitude)
-                    dateTime = dateTime.setZone(timezone)
-                    // If you want to set a specific timezone
-                    // dateTime = dateTime.setZone("America/Chicago");
-                    const offset = dateTime.offsetNameShort || dateTime.offsetNameLong
-                    return `${dateTime.toLocaleString(DateTime.TIME_SIMPLE)} (${offset})`
+                    this.viewer.scene.postProcessStages.ambientOcclusion.enabled = false
+                    this.viewer.scene.postProcessStages.bloom.enabled = false
+                    this.clickableTrajectory = this.viewer.scene.primitives.add(new PointPrimitiveCollection())
+                    this.trajectory = this.viewer.entities.add(new Entity())
+                    this.trajectoryUpdateTimeout = null
+                    this.viewer.scene.globe.enableLighting = true
+                    this.viewer.scene.postRender.addEventListener(this.onFrameUpdate)
+                    this.viewer.scene.postRender.addEventListener(this.onFrameUpdate)
+                    this.viewer.scene.morphComplete.addEventListener(
+                        () => {
+                            this.viewer.zoomTo(this.viewer.entities)
+                        })
+                    this.viewer.animation.viewModel.setShuttleRingTicks([0.1, 0.25, 0.5, 0.75, 1, 2, 5, 10, 15])
+                    this.viewer.scene.globe.depthTestAgainstTerrain = true
+                    this.viewer.shadowMap.maxmimumDistance = 10000.0
+                    this.viewer.shadowMap.softShadows = true
+                    this.viewer.shadowMap.size = 4096
+                    this.viewer.animation.viewModel.timeFormatter = (date, _viewModel) => {
+                        const isoString = JulianDate.toIso8601(date)
+                        let dateTime = DateTime.fromISO(isoString)
+                        // get zone from current cesium location
+                        const cameraPosition = this.viewer.camera.positionCartographic
+                        const longitude = cameraPosition.longitude * 180 / Math.PI
+                        const latitude = cameraPosition.latitude * 180 / Math.PI
+
+                        const timezone = tzlookup(latitude, longitude)
+                        dateTime = dateTime.setZone(timezone)
+                        // If you want to set a specific timezone
+                        // dateTime = dateTime.setZone("America/Chicago");
+                        const offset = dateTime.offsetNameShort || dateTime.offsetNameLong
+                        return `${dateTime.toLocaleString(DateTime.TIME_SIMPLE)} (${offset})`
+                    }
+                    // Attach hover handler
+                    const handler = new ScreenSpaceEventHandler(this.viewer.scene.canvas)
+                    handler.setInputAction(this.onMove, ScreenSpaceEventType.MOUSE_MOVE)
+                    handler.setInputAction(this.onLeftDown, ScreenSpaceEventType.LEFT_DOWN)
+                    handler.setInputAction(this.onClick, ScreenSpaceEventType.LEFT_CLICK)
+                    handler.setInputAction(this.onLeftUp, ScreenSpaceEventType.LEFT_UP)
+                    // TODO: fix saving and sharing state
+                    // this.viewer.camera.moveEnd.addEventListener(this.onCameraUpdate)
+
+                    const clockViewModel = this.viewer.clockViewModel
+                    knockout.getObservable(clockViewModel, 'shouldAnimate')
+                        .subscribe(this.onAnimationChange)
+                    const layers = this.viewer.scene.imageryLayers
+                    const xofs = 0.00001
+                    const options = {
+                        url: require('../assets/home2.png').default,
+                        tileWidth: 1920,
+                        tileHeight: 1080,
+                        rectangle: Rectangle.fromDegrees(
+                            -48.530077110530044 + xofs,
+                            -27.490619277419633,
+                            -48.52971476731231 + xofs,
+                            -27.49044182943895),
+                        credit: 'potato'
+                    }
+                    console.log(options)
+                    layers.addImageryProvider(new SingleTileImageryProvider(options))
+                    this.viewer.scene.globe.translucency.frontFaceAlphaByDistance = new NearFarScalar(
+                        50.0,
+                        0.4,
+                        150.0,
+                        1.0
+                    )
+                    this.viewer.scene.globe.translucency.enabled = true
+                    this.viewer.scene.screenSpaceCameraController.enableCollisionDetection = false
+                    this.viewer.scene.globe.undergroundColor = Color.MIDNIGHTBLUE
+                    this.viewer.scene.globe.undergroundColorAlphaByDistance.near = 2
+                    this.viewer.scene.globe.undergroundColorAlphaByDistance.far = 10
+                    this.viewer.scene.globe.undergroundColorAlphaByDistance.nearValue = 0.2
+                    this.viewer.scene.globe.undergroundColorAlphaByDistance.farValue = 1.0
                 }
-                // Attach hover handler
-                const handler = new ScreenSpaceEventHandler(this.viewer.scene.canvas)
-                handler.setInputAction(this.onMove, ScreenSpaceEventType.MOUSE_MOVE)
-                handler.setInputAction(this.onLeftDown, ScreenSpaceEventType.LEFT_DOWN)
-                handler.setInputAction(this.onClick, ScreenSpaceEventType.LEFT_CLICK)
-                handler.setInputAction(this.onLeftUp, ScreenSpaceEventType.LEFT_UP)
-                // TODO: fix saving and sharing state
-                // this.viewer.camera.moveEnd.addEventListener(this.onCameraUpdate)
+                this.addBathymetryButton()
+                this.addCenterVehicleButton()
+                this.addFitContentsButton()
+                this.addCloseButton()
 
-                knockout.getObservable(this.viewer.clockViewModel, 'shouldAnimate').subscribe(this.onAnimationChange)
-                const layers = this.viewer.scene.imageryLayers
-                const xofs = 0.00001
-                const options = {
-                    url: require('../assets/home2.png').default,
-                    tileWidth: 1920,
-                    tileHeight: 1080,
-                    rectangle: Rectangle.fromDegrees(-48.530077110530044 + xofs, -27.490619277419633,
-                        -48.52971476731231 + xofs, -27.49044182943895),
-                    credit: 'potato'
+                this.correctedTrajectory = []
+                for (const pos of this.state.currentTrajectory) {
+                    this.correctedTrajectory.push(Cartographic.fromDegrees(pos[0], pos[1], pos[2]))
                 }
-                console.log(options)
-                layers.addImageryProvider(new SingleTileImageryProvider(options))
-                this.viewer.scene.globe.translucency.frontFaceAlphaByDistance = new NearFarScalar(
-                    50.0,
-                    0.4,
-                    150.0,
-                    1.0
-                )
-                this.viewer.scene.globe.translucency.enabled = true
-                this.viewer.scene.screenSpaceCameraController.enableCollisionDetection = false
-                this.viewer.scene.globe.undergroundColor = Color.MIDNIGHTBLUE
-                this.viewer.scene.globe.undergroundColorAlphaByDistance.near = 2
-                this.viewer.scene.globe.undergroundColorAlphaByDistance.far = 10
-                this.viewer.scene.globe.undergroundColorAlphaByDistance.nearValue = 0.2
-                this.viewer.scene.globe.undergroundColorAlphaByDistance.farValue = 1.0
+                await this.setup2(this.correctedTrajectory)
+            } catch (e) {
+                console.error('Cesium asyncSetup failed:', e)
+            } finally {
+                this.state.mapLoading = false
+                clearTimeout(failsafe)
             }
-            this.addBathymetryButton()
-            this.addCenterVehicleButton()
-            this.addFitContentsButton()
-            this.addCloseButton()
-
-            for (const pos of this.state.currentTrajectory) {
-                this.correctedTrajectory.push(Cartographic.fromDegrees(pos[0], pos[1], pos[2]))
-            }
-
-            this.setup2(this.correctedTrajectory)
         },
         updateShader () {
             // eslint-disable-next-line camelcase
@@ -239,6 +282,16 @@ export default {
             if (online) {
                 console.log('creating online viewer')
                 const imageryProviders = this.createAdditionalProviders()
+                let baseLayerProvider
+                if (Ion.defaultAccessToken && Ion.defaultAccessToken.length > 30) {
+                    baseLayerProvider = IonImageryProvider.fromAssetId(3954)
+                } else {
+                    baseLayerProvider = new UrlTemplateImageryProvider({
+                        url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        credit: 'Map tiles by OpenStreetMap.'
+                    })
+                }
+
                 return new Viewer(
                     'cesiumContainer',
                     {
@@ -252,8 +305,9 @@ export default {
                         shadows: true,
                         // eslint-disable-next-line
                         baseLayer: new ImageryLayer.fromProviderAsync(
-                            IonImageryProvider.fromAssetId(3954)
+                            baseLayerProvider
                         ),
+                        baseLayerPicker: true,
                         imageryProviderViewModels: imageryProviders,
                         orderIndependentTranslucency: false,
                         useBrowserRecommendedResolution: false
@@ -363,7 +417,9 @@ export default {
             this.state.trajectorySource = this.state.trajectorySources[0]
             this.loadTrajectory(this.state.trajectorySource)
             this.state.heightOffset = 0
-            this.state.heightOffset = updatedPositions[0].height
+            if (updatedPositions && updatedPositions.length > 0) {
+                this.state.heightOffset = updatedPositions[0].height
+            }
             this.processTrajectory(this.state.currentTrajectory)
             this.addModel()
             this.updateAndPlotTrajectory()
@@ -396,7 +452,7 @@ export default {
                             this.viewer.camera.direction = direction
                         } */
             // TODO: Find a better way to know that cesium finished loading
-            setTimeout(() => { this.state.mapLoading = false }, 2000)
+            this.state.mapLoading = false
             this.state.cameraType = 'follow'
             this.changeCamera()
             setTimeout(this.updateTimelineColors, 500)
@@ -765,6 +821,11 @@ export default {
 
         processTrajectory () {
             this.correctedTrajectory = []
+            if (!this.state.trajectories || !this.state.trajectorySource ||
+                !this.state.trajectories[this.state.trajectorySource]) {
+                console.warn('Trajectory data not available yet')
+                return
+            }
             this.points = this.state.trajectories[this.state.trajectorySource].trajectory
             for (const pos of this.points) {
                 this.correctedTrajectory.push(Cartographic.fromDegrees(pos[0], pos[1], pos[2]))
@@ -834,11 +895,16 @@ export default {
                     lastIndex++
                 }
                 if (bathymetry.time_boot_ms[lastIndex] >= positions.time_boot_ms[index]) {
-                    positionsWithDepth.push({
-                        latitude: positions.Lat[index] * 1e-7,
-                        longitude: positions.Lng[index] * 1e-7,
-                        depth: bathymetry.Dist[lastIndex]
-                    })
+                    const lat = positions.Lat[index] * 1e-7
+                    const lng = positions.Lng[index] * 1e-7
+                    const depth = bathymetry.Dist[lastIndex]
+                    if (!isNaN(lat) && !isNaN(lng) && !isNaN(depth)) {
+                        positionsWithDepth.push({
+                            latitude: lat,
+                            longitude: lng,
+                            depth: depth
+                        })
+                    }
                 }
             }
             return positionsWithDepth
@@ -855,7 +921,7 @@ export default {
             let positionsWithDepth = this.aggregateDepth(bathymetry, this.state.messages.POS)
 
             // Filter out outliers and invalid readings
-            const depths = positionsWithDepth.map(p => p.depth).filter(d => d > 0.1)
+            const depths = positionsWithDepth.map(p => p.depth).filter(d => d !== null && !isNaN(d) && d > 0.1)
             const mean = depths.reduce((a, b) => a + b, 0) / depths.length
             const stdDev = Math.sqrt(depths.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / depths.length)
 
@@ -1322,15 +1388,17 @@ export default {
             return this.state.flightModeChanges[this.state.flightModeChanges.length - 1][1]
         },
         updateVisibility () {
-            this.waypoints.show = this.showWaypoints
-            this.trajectory.show = this.showTrajectory
-            this.fences.show = this.showFences
+            if (this.waypoints) this.waypoints.show = this.showWaypoints
+            if (this.trajectory) this.trajectory.show = this.showTrajectory
+            if (this.fences) this.fences.show = this.showFences
 
-            const len = this.clickableTrajectory.length
-            for (let i = 0; i < len; ++i) {
-                this.clickableTrajectory.get(i).show = this.showClickableTrajectory
+            if (this.clickableTrajectory) {
+                const len = this.clickableTrajectory.length
+                for (let i = 0; i < len; ++i) {
+                    this.clickableTrajectory.get(i).show = this.showClickableTrajectory
+                }
             }
-            this.viewer.scene.requestRender()
+            if (this.viewer) this.viewer.scene.requestRender()
         },
         getVehicleModel () {
             const type = this.state.vehicle
@@ -1399,7 +1467,8 @@ export default {
             // based on the requiredMessages property
             const colorCoders = {}
             for (const [key, value] of Object.entries(this.availableColorCoders)) {
-                if (value.requiredMessages.every(m => Object.keys(this.state.messageTypes).includes(m))) {
+                if (this.state.messageTypes &&
+                    value.requiredMessages.every(m => Object.keys(this.state.messageTypes).includes(m))) {
                     colorCoders[key] = value
                 }
             }

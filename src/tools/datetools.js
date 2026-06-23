@@ -1,9 +1,9 @@
 
-function leapSecondsGPS (year, month) {
+export function leapSecondsGPS (year, month) {
     return leapSecondsTAI(year, month) - 19
 }
 
-function leapSecondsTAI (year, month) {
+export function leapSecondsTAI (year, month) {
     const yyyymm = year * 100 + month
     if (yyyymm >= 201701) return 37
     if (yyyymm >= 201507) return 36

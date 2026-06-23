@@ -10,7 +10,9 @@
         <!-- TABHOLDER -->
         <i class="fa fa-bars fa-2x toggle-btn" v-b-toggle.menucontent></i>
         <b-collapse class="menu-content collapse out" id="menucontent" visible>
-            <span v-if="state.file" class="filename">Current file: {{state.file}}</span>
+            <span v-if="state.filename" class="filename">
+                {{state.filename}}
+            </span>
             <div class="tabholder">
                 <!-- Home -->
                 <a :class="selected === 'home' ? 'selected' : ''" @click="selected='home'" v-if="!state.processDone">
@@ -32,8 +34,9 @@
                     <plotSetup/>
                     <message-menu/>
                 </div>
-                <div v-if="selected==='home'">
+                <div v-show="selected==='home'">
                     <Dropzone/>
+
                     <span class="buildinfo">Commit {{state.commit}}</span>
                     <span class="buildinfo">Built {{state.buildDate}}</span>
                 </div>
@@ -154,6 +157,7 @@ export default {
             this.selected = selected
         },
 
+
         startCapture (displayMediaOptions) {
             navigator.mediaDevices.getDisplayMedia({video: { mediaSource: 'screen' }})
                 .then((stream) => {
@@ -215,7 +219,8 @@ export default {
 
         downloadFile (filename) {
             this.downloadBlob(this.state.files[filename], filename, 'application/octet-stream')
-        }
+        },
+
     },
     created () {
         this.$eventHub.$on('set-selected', this.setSelected)
@@ -234,6 +239,16 @@ export default {
        a {
         padding: 2px 60px 2px 55px !important;
        }
+    }
+    .add-log-btn {
+        margin-left: 10px;
+        cursor: pointer;
+        color: #64e9ff;
+        font-size: 0.9em;
+        transition: transform 0.2s;
+    }
+    .add-log-btn:hover {
+        transform: scale(1.2);
     }
 </style>
 
@@ -591,5 +606,66 @@ a.centered-section {
         border-left: none;
         margin-left: 40%;
 
+    }
+
+    .loaded-logs {
+        margin: 20px;
+        padding: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 5px;
+        background: rgba(0, 0, 0, 0.2);
+    }
+
+    .section-title {
+        display: block;
+        font-size: 14px;
+        font-weight: bold;
+        margin-bottom: 10px;
+        color: #64e9ff;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    .log-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .log-list li {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 5px 8px;
+        margin-bottom: 5px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 3px;
+        font-size: 13px;
+        border-left: 3px solid transparent;
+    }
+
+    .log-list li.active {
+        border-left: 3px solid #64e9ff;
+        background: rgba(100, 233, 255, 0.1);
+    }
+
+    .log-name {
+        flex-grow: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        cursor: pointer;
+    }
+
+    .remove-log {
+        margin-left: 10px;
+        cursor: pointer;
+        color: #ff4d4d;
+        opacity: 0.7;
+        transition: opacity 0.2s;
+    }
+
+    .remove-log:hover {
+        opacity: 1;
     }
 </style>

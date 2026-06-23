@@ -9,44 +9,71 @@
       </div>
     </li>
     <b-collapse id="plotsetupcontent" class="menu-content collapse out" visible>
-      <ul class="colorpicker plot-wrapper">
-        <template v-if="state.expressions.length">
-          <template v-for="(field, index) in state.expressions">
-            <li class="field plotsetup" :key="'field' + index">
-              <expression-editor v-model.lazy="field.name" v-debounce="1000" :suggestions="completionOptions" />
-              <select v-model.number="field.axis">
-                <option v-for="axis in state.allAxis" :key="'axisnumber' + axis" :value="axis">{{ axis }}</option>
-              </select>
-              <select v-model="field.color" :style="{ color: field.color }">
-                <option v-for="color in state.allColors" :key="'axisColor' + color" :value="color"
-                  :style="{ color: color }">■
-                </option>
-              </select>
-              <a class="remove-button" @click="$eventHub.$emit('togglePlot', field.name)">
-                <i class="expand fas fa-trash" title="Remove data"></i>
-              </a>
-            </li>
-            <li v-if="state.expressionErrors[index]" :key="'field' + index + 'err'" class="error">
-              <i class="fas fa-exclamation-circle error" :title="state.expressionErrors[index]"></i>
-              {{ state.expressionErrors[index] }}
-            </li>
+      <div v-for="(chart, chartIdx) in state.charts" :key="'chartArea' + chartIdx" class="chart-setup-area">
+        <div class="chart-header">
+           <span>Chart #{{ chartIdx + 1 }}</span>
+           <a v-if="state.charts.length > 1" class="remove-button-chart" @click="removeChart(chartIdx)">
+              <i class="fas fa-times-circle" title="Remove entire chart"></i>
+           </a>
+        </div>
+        <ul class="colorpicker plot-wrapper-inner">
+          <template v-if="chart.expressions.length">
+            <template v-for="(field, index) in chart.expressions">
+              <li class="field plotsetup" :key="'field' + chartIdx + '_' + index">
+                <expression-editor v-model.lazy="field.name" v-debounce="1000" :suggestions="completionOptions" />
+                <select v-model.number="field.axis" @change="$eventHub.$emit('recalc-plots')">
+                  <option v-for="axis in state.allAxis" :key="'axisnumber' + axis" :value="axis">{{ axis + 1 }}</option>
+                </select>
+                <select v-model="field.color" :style="{ color: field.color }" @change="$eventHub.$emit('recalc-plots')">
+                  <option v-for="color in state.allColors" :key="'axisColor' + color" :value="color"
+                    :style="{ color: color }">■
+                  </option>
+                </select>
+                <a class="remove-button" @click="removePlot(chartIdx, field.name)">
+                  <i class="expand fas fa-trash" title="Remove data"></i>
+                </a>
+              </li>
+              <li v-if="chart.expressionErrors[index]" :key="'field' + chartIdx + '_' + index + 'err'" class="error">
+                <i class="fas fa-exclamation-circle error" :title="chart.expressionErrors[index]"></i>
+                {{ chart.expressionErrors[index] }}
+              </li>
+            </template>
           </template>
-        </template>
-        <li v-else>Please plot something first.</li>
-      </ul>
-      <!-- BUTTONS -->
-      <div class="btns-wrapper">
-        <button class="add-expression" @click="createNewExpression">
-          <i class="fa fa-plus" aria-hidden="true"></i>Add Expression
-        </button>
-        <button v-if="state.expressions.length > 0" class="save-preset" v-b-modal.modal-prevent-closing>
-          <i class="fa fa-check-circle" aria-hidden="true"></i>Save Preset
-        </button>
-        <button class="save-preset" v-if="state.expressions.length > 0" v-b-modal.modal-prevent-closing
-          @click="$eventHub.$emit('clearPlot')">
-          <i class="fa fa-ban" aria-hidden="true"></i>
-          clear
-        </button>
+          <li v-else>No expressions in this chart.</li>
+        </ul>
+        <div class="btns-wrapper">
+          <button class="add-expression" @click="createNewExpression(chartIdx)">
+            <i class="fa fa-plus" aria-hidden="true"></i>Add to Chart {{ chartIdx + 1 }}
+          </button>
+          <button class="clear-all" v-if="chart.expressions.length > 0"
+                  @click="clearChart(chartIdx)">
+            <i class="fa fa-ban" aria-hidden="true"></i>Clear Chart
+          </button>
+        </div>
+
+      </div>
+      <!-- GLOBAL BUTTONS -->
+      <div class="btns-wrapper global-btns"
+           style="flex-direction: column; align-items: center; gap: 10px;">
+        <div class="global-settings" style="display: flex; gap: 15px; color: #fff;">
+          <label style="cursor: pointer;">
+            <input type="checkbox" v-model="state.syncZoom"> Sync Zoom
+          </label>
+          <label style="cursor: pointer;">
+            <input type="checkbox" v-model="state.statsFullRange"
+                   @change="$eventHub.$emit('recalc-stats')"> Full Range Stats
+          </label>
+        </div>
+        <div class="global-action-btns">
+          <button class="add-chart" @click="createNewChart">
+             <i class="fa fa-plus-square" aria-hidden="true"></i>Add New Chart
+          </button>
+          <button v-if="state.charts.some(c => c.expressions.length > 0)"
+                  class="save-preset" v-b-modal.modal-prevent-closing>
+            <i class="fa fa-check-circle" aria-hidden="true"></i>Save Preset
+          </button>
+        </div>
+
       </div>
     </b-collapse>
     <!-- MODAL -->
@@ -83,6 +110,8 @@ export default {
             const additionalCompletionItems = [
                 'mag_heading_df(MAG[0],ATT)',
                 'mag_heading(RAW_IMU,ATTITUDE)',
+                'constrain_angle(a)',
+                'constrain_angle_180(a)',
                 'max(x,y)',
                 'min(x,y)'
             ]
@@ -100,32 +129,65 @@ export default {
         }
     },
     methods: {
-        createNewExpression () {
+        createNewChart () {
+            this.state.charts.push({
+                expressions: [],
+                expressionErrors: []
+            })
+        },
+        removeChart (index) {
+            this.state.charts.splice(index, 1)
+        },
+        createNewExpression (chartIdx) {
             this.state.plotOn = true
+            const chart = this.state.charts[chartIdx]
             this.$nextTick(() => {
-                this.state.expressions.push({
+                chart.expressions.push({
                     name: '1+1',
-                    color: this.getFirstFreeColor(),
-                    axis: this.getFirstFreeAxis()
+                    color: this.getFirstFreeColor(chartIdx),
+                    axis: this.getFirstFreeAxis(chartIdx)
                 })
             })
         },
         // TODO: this is duplicated in Plotly.vue, refactor it out!
-        getFirstFreeAxis () {
+        getFirstFreeAxis (chartIdx) {
+            const chart = this.state.charts[chartIdx]
             return this.state.allAxis.find(axis =>
-                !this.state.expressions.some(field => field.axis === axis)
+                !chart.expressions.some(field => field.axis === axis)
             ) || this.state.allAxis[this.state.allAxis.length - 1]
         },
-        getFirstFreeColor () {
+        getFirstFreeColor (chartIdx) {
+            const chart = this.state.charts[chartIdx]
             return this.state.allColors.find(color =>
-                !this.state.expressions.some(field => field.color === color)
+                !chart.expressions.some(field => field.color === color)
             ) || this.state.allColors[this.state.allColors.length - 1]
         },
+        removePlot (chartIdx, fieldName) {
+            const chart = this.state.charts[chartIdx]
+            const index = chart.expressions.findIndex(e => e.name === fieldName)
+            if (index !== -1) {
+                chart.expressions.splice(index, 1)
+            }
+        },
+        clearChart (index) {
+            const chart = this.state.charts[index]
+            chart.expressions = []
+            chart.expressionErrors = []
+        },
+        clearAllPlots () {
+            this.state.charts.forEach(chart => {
+                chart.expressions = []
+                chart.expressionErrors = []
+            })
+        },
+
         savePreset (name) {
             const myStorage = window.localStorage
             const saved = JSON.parse(myStorage.getItem('savedFields')) || {}
-            saved[name] = this.state.expressions.map(field =>
-                [field.name, field.axis, field.color, field.function]
+            // For presets, we might want to save all charts or just the first one.
+            // Saving all charts for now as a nested structure.
+            saved[name] = this.state.charts.map(chart =>
+                chart.expressions.map(field => [field.name, field.axis, field.color, field.function])
             )
             myStorage.setItem('savedFields', JSON.stringify(saved))
             this.$eventHub.$emit('presetsChanged')
@@ -257,9 +319,12 @@ select option:hover {
   background-color: rgb(33, 41, 61);
   color: #fff;
   border-radius: 15px;
-  padding: 0px 10px 0px 0px;
+  padding: 5px 15px 5px 10px;
   border: 1px solid rgba(91, 100, 117, 0.76);
   font-size: 13px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
 }
 
 .save-preset:hover {
@@ -278,9 +343,12 @@ select option:hover {
   background-color: rgb(33, 41, 61);
   color: #fff;
   border-radius: 15px;
-  padding: 0px 10px 0px 0px;
+  padding: 5px 15px 5px 10px;
   border: 1px solid rgba(91, 100, 117, 0.76);
   font-size: 13px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
 }
 
 .add-expression:hover {
@@ -305,5 +373,78 @@ select option:hover {
   p.plotname {
     width: 60%;
   }
+}
+</style>
+<style scoped>
+.chart-setup-area {
+  border-bottom: 1px solid #434b52da;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+}
+
+.chart-header {
+  padding: 5px 20px;
+  background-color: #1e2536;
+  font-weight: bold;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.remove-button-chart {
+  color: #ff4d4d;
+  cursor: pointer;
+}
+
+.plot-wrapper-inner {
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.global-btns {
+  border-top: 2px solid #5b6475;
+  padding-top: 10px;
+}
+
+.add-chart {
+  background-color: rgb(33, 41, 61);
+  color: #fff;
+  border-radius: 15px;
+  padding: 5px 15px;
+  border: 1px solid #5b6475;
+  font-size: 13px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+}
+
+.clear-all {
+  background-color: rgb(33, 41, 61);
+  color: #fff;
+  border-radius: 15px;
+  padding: 5px 15px 5px 10px;
+  border: 1px solid #5b6475;
+  font-size: 13px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+}
+
+.clear-all:hover {
+  background-color: rgb(33, 41, 61);
+  box-shadow: 0px 0px 12px 0px rgba(133, 37, 37, 0.55);
+  transition: all 0.5s ease;
+}
+
+.add-chart:hover {
+  background-color: #3e4e73;
+}
+
+.global-action-btns {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
 }
 </style>

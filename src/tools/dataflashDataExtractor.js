@@ -71,6 +71,9 @@ const events = {
 export class DataflashDataExtractor {
     static extractAttitude (messages, source) {
         const attitudes = {}
+        if (source === undefined) {
+            source = ('ATT' in messages) ? 'ATT' : 'AHR2'
+        }
         if (source in messages) {
             const attitudeMsgs = messages[source]
             for (const i in attitudeMsgs.time_boot_ms) {
@@ -333,6 +336,13 @@ export class DataflashDataExtractor {
     static extractTrajectory (messages, source) {
         // returns a dict with the trajectories found
         const ret = {}
+        if (source === undefined) {
+            const sources = this.extractTrajectorySources(messages)
+            for (const s of sources) {
+                Object.assign(ret, this.extractTrajectory(messages, s))
+            }
+            return ret
+        }
         if ('POS' in messages && source === 'POS') {
             const trajectory = []
             const timeTrajectory = {}

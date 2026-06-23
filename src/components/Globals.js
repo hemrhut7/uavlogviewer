@@ -2,13 +2,13 @@ import '../mavextra/mavextra'
 import '../mavextra/mymavextra'
 
 export const store = {
-    // currentTrajectory: [],
     trajectorySource: '',
     trajectories: {},
     timeTrajectory: {},
     timeAttitude: {},
     timeAttitudeQ: {},
     logType: '',
+    params: null,
     defaultParams: {},
     showParams: false,
     showRadio: false,
@@ -18,15 +18,19 @@ export const store = {
     showEkfHelper: false,
     flightModeChanges: [],
     file: null,
+    filename: '',
+    messages: {},
+    messageTypes: {},
     events: [],
     cssColors: [],
     colors: [],
     mapAvailable: false,
+    mapConnectionMode: (typeof navigator !== 'undefined' && navigator.onLine) ? 'online' : 'offline',
     mission: [],
     fences: [],
     showFences: true,
     showMap: false,
-    showMagFit: false,
+    showMagfit: false,
     currentTime: false,
     processDone: false,
     plotOn: false,
@@ -35,9 +39,11 @@ export const store = {
     mapLoading: false,
     plotLoading: false,
     timeRange: null,
+    syncZoom: true,
+    statsFullRange: true,
     textMessages: [],
     namedFloats: [],
-    metadata: null,
+    metadata: {},
     // cesium menu:
     modelScale: 1.0,
     heightOffset: 0.0,
@@ -48,6 +54,12 @@ export const store = {
     attitudeSource: null,
     showWaypoints: true,
     cameraType: 'follow',
+    charts: [
+        {
+            expressions: [],
+            expressionErrors: []
+        }
+    ],
     expressions: [], // holds message name
     expressionErrors: [],
     plotCache: {},

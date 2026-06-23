@@ -12,6 +12,14 @@ window.radians = function (a) {
     return 0.0174533 * a
 }
 
+window.constrain_angle = function (a) {
+    return ((a + 180) % 360 + 360) % 360 - 180
+}
+
+window.constrain_angle_180 = function (a) {
+    return ((a + 180) % 360 + 360) % 360 - 180
+}
+
 // convert m/s to Km/h
 window.kmh = function (mps) {
     return mps * 3.6
@@ -77,11 +85,8 @@ window.mag_heading = function (RAW_IMU, ATTITUDE, declination, SENSOR_OFFSETS, o
     const cosPitchSqr = 1.0 - (dcmMatrix.e(6) * dcmMatrix.e(6))
     const headY = magY * dcmMatrix.e(8) - magZ * dcmMatrix.e(7)
     const headX = magX * cosPitchSqr - dcmMatrix.e(6) * (magY * dcmMatrix.e(7) + magZ * dcmMatrix.e(8))
-    let heading = window.degrees(Math.atan2(-headY, headX)) + declination
-    if (heading < -180) {
-        heading += 360
-    }
-    return heading
+    const heading = window.degrees(Math.atan2(-headY, headX)) + declination
+    return ((heading + 180) % 360 + 360) % 360 - 180
 }
 
 window.mag_heading_df = function (MAG, ATT, declination, SENSOR_OFFSETS, ofs) {
@@ -107,11 +112,8 @@ window.mag_heading_df = function (MAG, ATT, declination, SENSOR_OFFSETS, ofs) {
     const cosPitchSqr = 1.0 - (dcmMatrix.e(6) * dcmMatrix.e(6))
     const headY = magY * dcmMatrix.e(8) - magZ * dcmMatrix.e(7)
     const headX = magX * cosPitchSqr - dcmMatrix.e(6) * (magY * dcmMatrix.e(7) + magZ * dcmMatrix.e(8))
-    let heading = window.degrees(Math.atan2(-headY, headX)) + declination
-    if (heading < 0) {
-        heading += 360
-    }
-    return heading
+    const heading = window.degrees(Math.atan2(-headY, headX)) + declination
+    return ((heading + 180) % 360 + 360) % 360 - 180
 }
 
 window.mag_field = function (RAW_IMU, SENSOR_OFFSETS, ofs) {

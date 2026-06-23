@@ -47,8 +47,12 @@
                       <td>{{ value.scaling.toFixed(2) }}</td>
                       <td>{{ fitnessesPreCalibration[index].toFixed(0)}}</td>
                       <td><button v-on:click="fitWmm(index)"> Fit </button></td>
-                      <td><button v-if="value?.offsets" @click="plotOldRaw(index)">Plot Raw</button></td>
-                      <td><button v-if="value?.offsets" @click="plotOldHeading(index)">Plot Heading</button></td>
+                      <td><button v-if="value && value.offsets" @click="plotOldRaw(index)">Plot Raw</button></td>
+                      <td>
+                        <button v-if="value && value.offsets" @click="plotOldHeading(index)">
+                          Plot Heading
+                        </button>
+                      </td>
 
                   </tr>
               </table>
@@ -68,13 +72,20 @@
                   </tr>
                   <tr :key="'param' + index" v-for="(value, index) in newCorrections">
                     <td> {{ index }} </td>
-                      <td>{{ value?.offsets?.x?.toFixed(2) }}</td>
-                      <td>{{ value?.offsets?.y?.toFixed(2) }}</td>
-                      <td>{{ value?.offsets?.z?.toFixed(2) }}</td>
-                      <td>{{ value?.scaling?.toFixed(2) }}</td>
-                      <td>{{ fitnessesPostCalibration[index]?.toFixed(0) ?? '--'  }}</td>
-                      <td><button v-if="value?.offsets" @click="plotRaw(index)">Plot Raw</button></td>
-                      <td><button v-if="value?.offsets" @click="plotNewHeading(index)">Plot Heading</button></td>
+                      <td>{{ value && value.offsets && value.offsets.x ? value.offsets.x.toFixed(2) : '--' }}</td>
+                      <td>{{ value && value.offsets && value.offsets.y ? value.offsets.y.toFixed(2) : '--' }}</td>
+                      <td>{{ value && value.offsets && value.offsets.z ? value.offsets.z.toFixed(2) : '--' }}</td>
+                      <td>{{ value && value.scaling ? value.scaling.toFixed(2) : '--' }}</td>
+                      <td>
+                        {{ fitnessesPostCalibration[index] !== undefined ?
+                           fitnessesPostCalibration[index].toFixed(0) : '--'  }}
+                      </td>
+                      <td><button v-if="value && value.offsets" @click="plotRaw(index)">Plot Raw</button></td>
+                      <td>
+                        <button v-if="value && value.offsets" @click="plotNewHeading(index)">
+                          Plot Heading
+                        </button>
+                      </td>
                   </tr>
               </table>
               <i v-if="processing" class="fas fa-spinner fa-spin"></i>

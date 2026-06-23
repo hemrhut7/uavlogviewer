@@ -9,6 +9,11 @@
             </select>
         <!-- CHECKBOXES -->
         <div>
+            <label>Map Connection</label>
+            <select class="cesium-button" v-model="state.mapConnectionMode" style="display: block; margin-bottom: 5px;">
+                <option value="offline">Offline</option>
+                <option value="online">Online</option>
+            </select>
             <label><input type="checkbox" v-model="state.showWaypoints">
             Waypoints</label>
             <label><input type="checkbox" v-model="state.showTrajectory">
@@ -75,7 +80,9 @@ export default {
     },
     computed: {
         attitudeSources () {
-            return [...this.state.attitudeSources.quaternions, ...this.state.attitudeSources.eulers]
+            const quaternions = this.state.attitudeSources?.quaternions || []
+            const eulers = this.state.attitudeSources?.eulers || []
+            return [...quaternions, ...eulers]
         }
     }
 }

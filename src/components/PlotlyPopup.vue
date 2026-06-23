@@ -206,37 +206,61 @@ export default {
             }
         },
         addMaxMinMeanToTitles   () {
-            const average = arr => arr.reduce((p, c) => p + c, 0) / arr.length
+            const average = arr => arr.length > 0 ? arr.reduce((p, c) => p + c, 0) / arr.length : 0
             const gd = this.gd
-            const xRange = gd.layout.xaxis.range
+            if (!gd || !gd.data) return
 
-            let needsRelayout = false
+            let xRange = gd._fullLayout && gd._fullLayout.xaxis ? gd._fullLayout.xaxis.range : null
+            if (!xRange && gd.layout && gd.layout.xaxis) {
+                xRange = gd.layout.xaxis.range
+            }
+
+            let needsRestyle = false
 
             gd.data.forEach(trace => {
-                const len = Math.min(trace.x.length, trace.y.length)
-                const xInside = []
-                const yInside = []
+                let yInside = []
 
-                for (let i = 0; i < len; i++) {
-                    const x = trace.x[i]
-                    const y = trace.y[i]
+                const useFullRange = this.state.statsFullRange || !xRange || xRange.length < 2
+                if (useFullRange) {
+                    yInside = trace.y.filter(val => val !== null && !isNaN(val))
+                } else {
+                    const len = Math.min(trace.x.length, trace.y.length)
+                    for (let i = 0; i < len; i++) {
+                        const x = trace.x[i]
+                        const y = trace.y[i]
 
-                    if (x > xRange[0] && x < xRange[1]) {
-                        xInside.push(x)
-                        yInside.push(y)
+                        if (x > xRange[0] && x < xRange[1] && y !== null && !isNaN(y)) {
+                            yInside.push(y)
+                        }
                     }
                 }
-                const extraData = ` | Min: ${Math.min(...yInside).toFixed(2)} \
-    Max: ${Math.max(...yInside).toFixed(2)} \
-    Mean: ${average(yInside).toFixed(2)}`
 
-                if (trace.name.indexOf(extraData) === -1) {
+                if (yInside.length === 0) return
+
+                let min = yInside[0]
+                let max = yInside[0]
+                for (let i = 1; i < yInside.length; i++) {
+                    const v = yInside[i]
+                    if (v < min) min = v
+                    if (v > max) max = v
+                }
+
+                const mean = average(yInside)
+                const variance = yInside.reduce((p, c) => p + Math.pow(c - mean, 2), 0) / yInside.length
+                const std = Math.sqrt(variance)
+
+                const extraData = ` | Min: ${min.toFixed(2)}` +
+                    ` Max: ${max.toFixed(2)}` +
+                    ` Mean: ${mean.toFixed(2)}` +
+                    ` Std: ${std.toFixed(2)}`
+
+                if (trace.name.indexOf(' | ') === -1 || trace.name.split(' | ')[1] !== extraData.substring(3)) {
                     trace.name = trace.name.split(' | ')[0] + extraData
-                    needsRelayout = true
+                    needsRestyle = true
                 }
             })
-            if (needsRelayout) {
-                Plotly.relayout(this.gd, this.gd.layout)
+            if (needsRestyle) {
+                Plotly.restyle(this.gd, { name: gd.data.map(trace => trace.name) })
             }
         },
 
@@ -246,7 +270,23 @@ export default {
             delete this.plotOptions.xaxis.rangeslider
             if (this.plotInstance !== null) {
                 this.plotOptions.xaxis.range = this.gd._fullLayout.xaxis.range
-                Plotly.newPlot(this.gd, this.plotData, this.plotOptions, { scrollZoom: true, responsive: true })
+                Plotly.newPlot(this.gd, this.plotData, this.plotOptions, {
+                    scrollZoom: true,
+                    responsive: true,
+                    editable: true,
+                    edits: {
+                        annotationPosition: false,
+                        annotationTail: false,
+                        annotationText: false,
+                        axisTitleText: false,
+                        colorbarPosition: false,
+                        colorbarTitleText: false,
+                        legendPosition: true,
+                        legendText: false,
+                        shapePosition: false,
+                        titleText: false
+                    }
+                })
             } else {
                 this.plotInstance = Plotly.newPlot(
                     this.gd,
@@ -256,6 +296,18 @@ export default {
                         modeBarButtonsToAdd: [this.csvButton()],
                         scrollZoom: true,
                         editable: true,
+                        edits: {
+                            annotationPosition: false,
+                            annotationTail: false,
+                            annotationText: false,
+                            axisTitleText: false,
+                            colorbarPosition: false,
+                            colorbarTitleText: false,
+                            legendPosition: true,
+                            legendText: false,
+                            shapePosition: false,
+                            titleText: false
+                        },
                         responsive: true
                     }
                 )
@@ -273,6 +325,7 @@ export default {
             this.addModeShapes()
             this.addEvents()
             // this.addParamChanges()
+            this.addMaxMinMeanToTitles()
 
             this.state.plotLoading = false
 
