@@ -105,7 +105,8 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore) -> str:
 
         # Add Flight Mode background color bands with empty string on row > 1 to prevent "new text"
         if parsed_log.flight_modes:
-            for span in parsed_log.flight_modes:
+            spans_to_draw = parsed_log.flight_modes[:100]
+            for span in spans_to_draw:
                 fig.add_vrect(
                     x0=span.start_time,
                     x1=span.end_time,

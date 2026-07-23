@@ -22,8 +22,9 @@ class MavlinkParser(BaseParser):
             print(f"Error opening MAVLink tlog {filepath}: {e}")
             return parsed
 
-        raw_data: Dict[str, Dict[str, list]] = {}
-        raw_times: Dict[str, list] = {}
+        raw_data: Dict[Any, Dict[str, list]] = {}
+        raw_times: Dict[Any, list] = {}
+        all_sysids = set()
         flight_mode_events = []
         last_mode = None
 
@@ -37,6 +38,8 @@ class MavlinkParser(BaseParser):
                 continue
 
             t = getattr(m, '_timestamp', 0.0)
+            sysid = getattr(m, '_header', None).srcSystem if (hasattr(m, '_header') and m._header) else (m.get_srcSystem() if hasattr(m, 'get_srcSystem') else 1)
+            all_sysids.add(sysid)
 
             if mtype == 'PARAM_VALUE':
                 try:
@@ -60,10 +63,11 @@ class MavlinkParser(BaseParser):
 
             elif mtype == 'HEARTBEAT':
                 try:
-                    mode_str = mavutil.mode_string_v10(m)
-                    if mode_str != last_mode:
-                        last_mode = mode_str
-                        flight_mode_events.append((t, mode_str))
+                    if sysid == 1:
+                        mode_str = mavutil.mode_string_v10(m)
+                        if mode_str and mode_str != last_mode and not mode_str.startswith("Mode("):
+                            last_mode = mode_str
+                            flight_mode_events.append((t, mode_str))
                 except Exception:
                     pass
 
@@ -71,17 +75,25 @@ class MavlinkParser(BaseParser):
             if not fields:
                 continue
 
-            if mtype not in raw_data:
-                raw_data[mtype] = {f: [] for f in fields}
-                raw_times[mtype] = []
+            msg_key = (sysid, mtype)
+            if msg_key not in raw_data:
+                raw_data[msg_key] = {f: [] for f in fields}
+                raw_times[msg_key] = []
 
-            raw_times[mtype].append(t)
+            raw_times[msg_key].append(t)
             for f in fields:
                 val = getattr(m, f, 0.0)
-                raw_data[mtype][f].append(val)
+                raw_data[msg_key][f].append(val)
 
-        for mtype, field_dict in raw_data.items():
-            t_list = raw_times[mtype]
+        has_multiple_sysids = len({s for s in all_sysids if s != 0}) > 1
+
+        for (sysid, mtype), field_dict in raw_data.items():
+            if has_multiple_sysids:
+                sys_mtype = f"{mtype}[S{sysid}]"
+            else:
+                sys_mtype = mtype
+
+            t_list = raw_times[(sysid, mtype)]
             inst_col = None
             for c in ('C', 'I', 'Instance', 'instance', 'Inst', 'Core', 'Id', 'ID', 'id', 'sensor_id', 'Num'):
                 if c in field_dict:
@@ -101,7 +113,7 @@ class MavlinkParser(BaseParser):
                             inst_str = f"[{val_float}]"
                     except (ValueError, TypeError):
                         inst_str = f"[{inst_val}]"
-                    sub_mtype = f"{mtype}{inst_str}"
+                    sub_mtype = f"{sys_mtype}{inst_str}"
 
                     mask = (inst_arr == inst_val)
                     sub_t_arr = np.array(t_list, dtype=np.float64)[mask]
@@ -116,11 +128,11 @@ class MavlinkParser(BaseParser):
                             pass
             else:
                 t_arr = np.array(t_list, dtype=np.float64)
-                parsed.timestamps[mtype] = t_arr
-                parsed.field_tree[mtype] = list(field_dict.keys())
+                parsed.timestamps[sys_mtype] = t_arr
+                parsed.field_tree[sys_mtype] = list(field_dict.keys())
                 
                 for f, val_list in field_dict.items():
-                    key = f"{mtype}.{f}"
+                    key = f"{sys_mtype}.{f}"
                     try:
                         parsed.time_series[key] = np.array(val_list)
                     except Exception:
