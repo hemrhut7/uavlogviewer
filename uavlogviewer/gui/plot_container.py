@@ -63,11 +63,13 @@ class PlotContainer(QWidget):
         self.layout.addWidget(self.stats_box, stretch=1)
 
         self.parsed_log: Optional[ParsedLog] = None
+        self.current_visible_range: Optional[tuple] = None
 
         self.chart_store.updated.connect(self.update_plots)
 
     def set_parsed_log(self, parsed_log: ParsedLog):
         self.parsed_log = parsed_log
+        self.current_visible_range = None
         self.update_plots()
 
     def clear_plots(self):
@@ -80,21 +82,21 @@ class PlotContainer(QWidget):
             self.clear_plots()
             return
 
-        active_charts = [c for c in self.chart_store.charts if len(c.expressions) > 0]
-        if not active_charts:
+        if not self.chart_store.has_any_expressions():
             self.stats_box.setTitle("📊 Viewport Statistics [No Fields Plotted]")
             self.stats_table.setRowCount(0)
             self.update_embedded_plotly()
             return
 
-        self.update_stats_for_range(None, None)
+        self.update_stats_for_range(self.current_visible_range[0] if self.current_visible_range else None,
+                                   self.current_visible_range[1] if self.current_visible_range else None)
         self.update_embedded_plotly()
 
     def update_embedded_plotly(self):
         if not self.parsed_log or not self.chart_store:
             return
 
-        html_str = generate_plotly_html(self.parsed_log, self.chart_store)
+        html_str = generate_plotly_html(self.parsed_log, self.chart_store, visible_range=self.current_visible_range)
         
         tmp_dir = os.path.abspath(".agent_scratchpad")
         os.makedirs(tmp_dir, exist_ok=True)
@@ -111,15 +113,23 @@ class PlotContainer(QWidget):
         if not title or not title.startswith("RANGE:") or not self.parsed_log:
             return
 
+        has_scatter = any(c.chart_type == "scatter" for c in self.chart_store.charts)
+
         parts = title.split(":")
         if len(parts) == 3 and parts[1] != "RESET":
             try:
                 x0, x1 = float(parts[1]), float(parts[2])
+                self.current_visible_range = (x0, x1)
                 self.update_stats_for_range(x0, x1)
+                if has_scatter:
+                    self.update_embedded_plotly()
             except ValueError:
                 pass
         elif "RESET" in title:
+            self.current_visible_range = None
             self.update_stats_for_range(None, None)
+            if has_scatter:
+                self.update_embedded_plotly()
 
     def update_stats_for_range(self, x0: Optional[float] = None, x1: Optional[float] = None):
         if not self.parsed_log:

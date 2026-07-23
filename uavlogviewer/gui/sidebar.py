@@ -190,6 +190,11 @@ class SidebarWidget(QWidget):
         self.btn_add_chart.clicked.connect(self.on_add_chart_clicked)
         global_btns_layout.addWidget(self.btn_add_chart)
 
+        self.btn_add_xy = QPushButton("+ Add XY Scatter")
+        self.btn_add_xy.setStyleSheet("background-color: #ea580c; color: #ffffff; font-weight: bold; border-radius: 4px; padding: 4px 10px;")
+        self.btn_add_xy.clicked.connect(self.on_add_xy_clicked)
+        global_btns_layout.addWidget(self.btn_add_xy)
+
         chk_style = """
         QCheckBox {
             color: #171717;
@@ -339,6 +344,16 @@ class SidebarWidget(QWidget):
         target_idx = min(max(0, self.active_chart_idx), len(self.chart_store.charts) - 1)
         chart = self.chart_store.charts[target_idx]
 
+        if chart.chart_type == "scatter":
+            if chart.active_xy_target == 'X':
+                chart.x_field = field_key
+                chart.active_xy_target = 'Y'
+            else:
+                chart.y_field = field_key
+            self.chart_store.updated.emit()
+            self.rebuild_setup_panel()
+            return
+
         if chart.pending_builder is not None:
             builder = chart.pending_builder
             if builder.active_operand == 'A':
@@ -354,6 +369,18 @@ class SidebarWidget(QWidget):
     def on_add_chart_clicked(self):
         new_idx = self.chart_store.add_chart()
         self.set_active_chart(new_idx)
+
+    def on_add_xy_clicked(self):
+        new_idx = self.chart_store.add_xy_chart("", "")
+        self.set_active_chart(new_idx)
+
+    def set_xy_target(self, chart_idx: int, pair_idx: int, target: str):
+        chart = self.chart_store.charts[chart_idx]
+        if chart.chart_type == "scatter":
+            chart.active_pair_idx = pair_idx
+            chart.active_xy_target = target
+            self.set_active_chart(chart_idx)
+            self.rebuild_setup_panel()
 
     def on_sync_zoom_toggled(self, checked: bool):
         self.chart_store.sync_zoom = checked
@@ -649,6 +676,88 @@ class SidebarWidget(QWidget):
 
             card = ClickableFrame()
             card.clicked.connect(lambda idx=c_idx: self.set_active_chart(idx))
+
+            if chart.chart_type == "scatter":
+                # XY Scatter Card
+                if is_active:
+                    card.setStyleSheet("""
+                        QFrame { background-color: #fff7ed; border: 2px solid #ea580c; border-radius: 6px; margin-bottom: 8px; }
+                    """)
+                else:
+                    card.setStyleSheet("""
+                        QFrame { background-color: #ffffff; border: 1px solid #e5e5e5; border-radius: 6px; margin-bottom: 8px; }
+                    """)
+
+                card_layout = QVBoxLayout(card)
+                card_layout.setContentsMargins(8, 8, 8, 8)
+
+                h_layout = QHBoxLayout()
+                radio_btn = QRadioButton(f"XY Scatter #{c_idx + 1}")
+                radio_btn.setChecked(is_active)
+                radio_btn.setStyleSheet(f"color: {'#ea580c' if is_active else '#525252'}; font-weight: bold; font-size: 12px;")
+                radio_btn.toggled.connect(lambda checked, idx=c_idx: checked and self.set_active_chart(idx))
+                h_layout.addWidget(radio_btn)
+                h_layout.addStretch()
+
+                if len(self.chart_store.charts) > 1:
+                    btn_rm_chart = QPushButton("❌")
+                    btn_rm_chart.setStyleSheet("background: transparent; color: #ef4444; border: none; font-weight: bold;")
+                    btn_rm_chart.setToolTip("Remove scatter plot")
+                    btn_rm_chart.clicked.connect(lambda _, idx=c_idx: self.chart_store.remove_chart(idx))
+                    h_layout.addWidget(btn_rm_chart)
+
+                card_layout.addLayout(h_layout)
+
+                plotted_fields = self.chart_store.get_plotted_fields()
+
+                for p_idx, pair in enumerate(chart.pairs):
+                    is_pair_active = is_active and (p_idx == chart.active_pair_idx)
+                    
+                    xy_row = QWidget()
+                    xy_layout = QHBoxLayout(xy_row)
+                    xy_layout.setContentsMargins(0, 2, 0, 2)
+
+                    btn_x = QPushButton(f"X: {pair.x_field or '(Click field)'}")
+                    btn_y = QPushButton(f"Y: {pair.y_field or '(Click field)'}")
+
+                    if is_pair_active and chart.active_xy_target == 'X':
+                        btn_x.setStyleSheet("background: #f0fdfa; color: #0d9488; font-weight: bold; border: 2px solid #0d9488; border-radius: 4px; padding: 4px; font-size: 11px;")
+                        btn_y.setStyleSheet("background: #ffffff; color: #525252; border: 1px solid #cbd5e1; border-radius: 4px; padding: 4px; font-size: 11px;")
+                    elif is_pair_active and chart.active_xy_target == 'Y':
+                        btn_x.setStyleSheet("background: #ffffff; color: #525252; border: 1px solid #cbd5e1; border-radius: 4px; padding: 4px; font-size: 11px;")
+                        btn_y.setStyleSheet("background: #fff7ed; color: #ea580c; font-weight: bold; border: 2px solid #ea580c; border-radius: 4px; padding: 4px; font-size: 11px;")
+                    else:
+                        btn_x.setStyleSheet("background: #ffffff; color: #525252; border: 1px solid #cbd5e1; border-radius: 4px; padding: 4px; font-size: 11px;")
+                        btn_y.setStyleSheet("background: #ffffff; color: #525252; border: 1px solid #cbd5e1; border-radius: 4px; padding: 4px; font-size: 11px;")
+
+                    btn_x.clicked.connect(lambda _, c_i=c_idx, p_i=p_idx: self.set_xy_target(c_i, p_i, 'X'))
+                    btn_y.clicked.connect(lambda _, c_i=c_idx, p_i=p_idx: self.set_xy_target(c_i, p_i, 'Y'))
+
+                    xy_layout.addWidget(btn_x, stretch=1)
+                    vs_lbl = QLabel("vs")
+                    vs_lbl.setStyleSheet("font-weight: bold; color: #ea580c; font-size: 11px;")
+                    xy_layout.addWidget(vs_lbl)
+                    xy_layout.addWidget(btn_y, stretch=1)
+
+                    if len(chart.pairs) > 1:
+                        btn_rm_pair = QPushButton("❌")
+                        btn_rm_pair.setStyleSheet("background: transparent; color: #ef4444; border: none; font-weight: bold; padding: 0 4px;")
+                        btn_rm_pair.setToolTip("Remove pair")
+                        btn_rm_pair.clicked.connect(lambda _, c_i=c_idx, p_i=p_idx: self.chart_store.remove_xy_pair(c_i, p_i))
+                        xy_layout.addWidget(btn_rm_pair)
+
+                    card_layout.addWidget(xy_row)
+
+                btn_add_pair = QPushButton("➕ Add XY Pair")
+                btn_add_pair.setStyleSheet("""
+                    QPushButton { background-color: #fff7ed; color: #ea580c; font-weight: bold; border: 1px dashed #ea580c; border-radius: 4px; padding: 4px; font-size: 11px; margin-top: 4px; }
+                    QPushButton:hover { background-color: #ffedd5; }
+                """)
+                btn_add_pair.clicked.connect(lambda _, c_i=c_idx: self.chart_store.add_xy_pair(c_i))
+                card_layout.addWidget(btn_add_pair)
+
+                self.setup_content_layout.addWidget(card)
+                continue
 
             if is_active:
                 card.setStyleSheet("""
