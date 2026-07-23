@@ -7,7 +7,7 @@ import os
 import numpy as np
 from typing import Dict, List, Any
 from pymavlink import mavutil
-from uavlogviewer.parsers.base_parser import BaseParser, ParsedLog, FlightModeSpan, LogEvent, MODE_COLORS
+from uavlogviewer.parsers.base_parser import BaseParser, ParsedLog, FlightModeSpan, LogEvent, MODE_COLORS, is_valid_instance_column
 
 class MavlinkParser(BaseParser):
     def parse(self, filepath: str) -> ParsedLog:
@@ -81,17 +81,50 @@ class MavlinkParser(BaseParser):
                 raw_data[mtype][f].append(val)
 
         for mtype, field_dict in raw_data.items():
-            t_arr = np.array(raw_times[mtype], dtype=np.float64)
-            parsed.timestamps[mtype] = t_arr
-            parsed.field_tree[mtype] = list(field_dict.keys())
-            
-            for f, val_list in field_dict.items():
-                key = f"{mtype}.{f}"
-                try:
-                    arr = np.array(val_list)
-                    parsed.time_series[key] = arr
-                except Exception:
-                    pass
+            t_list = raw_times[mtype]
+            inst_col = None
+            for c in ('C', 'I', 'Instance', 'instance', 'Inst', 'Core', 'Id', 'ID', 'id', 'sensor_id', 'Num'):
+                if c in field_dict:
+                    if is_valid_instance_column(mtype, c, field_dict[c]):
+                        inst_col = c
+                        break
+
+            if inst_col is not None:
+                inst_arr = np.array(field_dict[inst_col])
+                unique_insts = np.unique(inst_arr)
+                for inst_val in unique_insts:
+                    try:
+                        val_float = float(inst_val)
+                        if val_float.is_integer():
+                            inst_str = f"[{int(val_float)}]"
+                        else:
+                            inst_str = f"[{val_float}]"
+                    except (ValueError, TypeError):
+                        inst_str = f"[{inst_val}]"
+                    sub_mtype = f"{mtype}{inst_str}"
+
+                    mask = (inst_arr == inst_val)
+                    sub_t_arr = np.array(t_list, dtype=np.float64)[mask]
+                    parsed.timestamps[sub_mtype] = sub_t_arr
+                    parsed.field_tree[sub_mtype] = list(field_dict.keys())
+
+                    for f, val_list in field_dict.items():
+                        key = f"{sub_mtype}.{f}"
+                        try:
+                            parsed.time_series[key] = np.array(val_list)[mask]
+                        except Exception:
+                            pass
+            else:
+                t_arr = np.array(t_list, dtype=np.float64)
+                parsed.timestamps[mtype] = t_arr
+                parsed.field_tree[mtype] = list(field_dict.keys())
+                
+                for f, val_list in field_dict.items():
+                    key = f"{mtype}.{f}"
+                    try:
+                        parsed.time_series[key] = np.array(val_list)
+                    except Exception:
+                        pass
 
         if flight_mode_events:
             for i in range(len(flight_mode_events)):

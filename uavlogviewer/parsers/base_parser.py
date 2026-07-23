@@ -139,6 +139,99 @@ class ParsedLog:
     text_messages: List[Dict[str, Any]] = field(default_factory=list)
     field_tree: Dict[str, List[str]] = field(default_factory=dict)
 
+    def get_data_rate(self, msg_type: str) -> float:
+        t_arr = self.timestamps.get(msg_type)
+        return calculate_data_rate(t_arr)
+
+def calculate_data_rate(timestamps: np.ndarray) -> float:
+    """Calculates effective data rate (Hz) for a series of timestamps, robust to long time gaps."""
+    if timestamps is None or len(timestamps) < 2:
+        return 0.0
+    
+    dt = np.diff(timestamps)
+    dt = dt[dt > 0]
+    if len(dt) == 0:
+        return 0.0
+    
+    med_dt = float(np.median(dt))
+    if med_dt <= 0:
+        return 0.0
+    
+    # Exclude gaps longer than 3.0s or 5 * median(dt) to handle long pause breakpoints
+    gap_threshold = max(3.0, 5.0 * med_dt)
+    active_dt = dt[dt <= gap_threshold]
+    
+    if len(active_dt) > 0:
+        mean_dt = float(np.mean(active_dt))
+        return 1.0 / mean_dt if mean_dt > 0 else 0.0
+    else:
+        return 1.0 / med_dt
+
+def format_data_rate(rate: float) -> str:
+    """Formats data rate into a human-readable string."""
+    if rate <= 0:
+        return "0 Hz"
+    elif rate >= 100:
+        return f"{rate:.0f} Hz"
+    elif rate >= 10:
+        return f"{rate:.1f} Hz"
+    elif rate >= 1:
+        return f"{rate:.1f} Hz"
+    else:
+        return f"{rate:.2f} Hz"
+
+# Messages that are explicitly known to use sensor/core/hardware instance indexing
+INSTANCE_MESSAGE_TYPES = {
+    'XKF1', 'XKF2', 'XKF3', 'XKF4', 'XKQ1', 'XKQ2', 'XKQ',
+    'NKF1', 'NKF2', 'NKF3', 'NKF4', 'NKQ1', 'NKQ2', 'NKQ',
+    'IMU', 'ACC', 'GYR', 'BARO', 'MAG', 'GPS', 'POS', 'GPA',
+    'RFND', 'BAT', 'BAT2', 'ESC', 'ORGN', 'AHR2', 'RATE',
+    'RAW_IMU', 'SCALED_IMU', 'SCALED_IMU2', 'SCALED_IMU3',
+    'BATTERY_STATUS', 'DISTANCE_SENSOR', 'MCU_STATUS'
+}
+
+# Messages that must NEVER be split by instance (PID integrators, units, system messages, etc.)
+EXCLUDE_INSTANCE_TYPES = {
+    'PARM', 'FMT', 'FMTU', 'UNIT', 'MSG', 'EV', 'MODE', 'HEAT',
+    'PIDR', 'PIDP', 'PIDY', 'PIDA', 'PIDZ', 'PIDS', 'TECS', 'TECB',
+    'PSCD', 'PSCE', 'PSCN', 'STAT', 'STATUSTEXT', 'HEARTBEAT'
+}
+
+def is_valid_instance_column(mtype: str, col_name: str, values: Any) -> bool:
+    """Strict check to prevent misidentifying PID integrals (I), Heat (I), or unit IDs as instance columns."""
+    base_mtype = mtype.split('[')[0].upper()
+    if base_mtype in EXCLUDE_INSTANCE_TYPES or base_mtype.startswith('PID'):
+        return False
+    
+    if values is None or len(values) == 0:
+        return False
+
+    if col_name not in ('C', 'I', 'Instance', 'instance', 'Inst', 'Core', 'Id', 'ID', 'id', 'sensor_id'):
+        return False
+        
+    unique_vals = np.unique(values)
+    if len(unique_vals) == 0 or len(unique_vals) > 32:
+        return False
+
+    try:
+        float_vals = unique_vals.astype(np.float64)
+        if np.any(np.isnan(float_vals)):
+            return False
+        # All values must be integer-like (e.g. 0, 1, 100) and within uint8 byte range (0 to 255)
+        if not np.all(np.abs(float_vals - np.round(float_vals)) < 1e-4):
+            return False
+        if not np.all((float_vals >= 0) & (float_vals <= 255)):
+            return False
+    except (ValueError, TypeError):
+        return False
+
+    if len(unique_vals) == 1 and base_mtype not in INSTANCE_MESSAGE_TYPES:
+        return False
+
+    return True
+
 class BaseParser:
     def parse(self, filepath: str) -> ParsedLog:
         raise NotImplementedError("Subclasses must implement parse()")
+
+

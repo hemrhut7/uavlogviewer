@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from typing import Dict, List, Optional
-from uavlogviewer.parsers.base_parser import ParsedLog
+from uavlogviewer.parsers.base_parser import ParsedLog, format_data_rate
 from uavlogviewer.models.chart_store import ChartStore, CalcBuilderState, DEFAULT_AXIS_COLORS
 
 COMBO_BEAUTY_STYLE = """
@@ -185,7 +185,7 @@ class SidebarWidget(QWidget):
         global_btns_layout = QHBoxLayout()
         global_btns_layout.setAlignment(Qt.AlignCenter)
 
-        self.btn_add_chart = QPushButton("➕ Add Chart")
+        self.btn_add_chart = QPushButton("+ Add Chart")
         self.btn_add_chart.setStyleSheet("background-color: #0d9488; color: #ffffff; font-weight: bold; border-radius: 4px; padding: 4px 10px;")
         self.btn_add_chart.clicked.connect(self.on_add_chart_clicked)
         global_btns_layout.addWidget(self.btn_add_chart)
@@ -294,7 +294,13 @@ class SidebarWidget(QWidget):
         self.tree.clear()
 
         for msg_type, fields in sorted(parsed_log.field_tree.items()):
-            parent_item = QTreeWidgetItem(self.tree, [msg_type])
+            rate = parsed_log.get_data_rate(msg_type)
+            if rate > 0:
+                display_name = f"{msg_type} ({format_data_rate(rate)})"
+            else:
+                display_name = msg_type
+            parent_item = QTreeWidgetItem(self.tree, [display_name])
+            parent_item.setData(0, Qt.UserRole, None)
             for f in sorted(fields):
                 child_item = QTreeWidgetItem(parent_item, [f])
                 child_item.setData(0, Qt.UserRole, f"{msg_type}.{f}" if msg_type != "CALC" else f)
@@ -321,6 +327,9 @@ class SidebarWidget(QWidget):
                 parent.setExpanded(bool(query))
 
     def on_tree_item_double_clicked(self, item: QTreeWidgetItem, column: int):
+        # Do not add category/parent nodes to plot
+        if item.childCount() > 0 or item.parent() is None:
+            return
         field_key = item.data(0, Qt.UserRole)
         if not field_key:
             return

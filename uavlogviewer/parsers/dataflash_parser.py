@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Any
 from pymavlink import DFReader, mavutil
-from uavlogviewer.parsers.base_parser import BaseParser, ParsedLog, FlightModeSpan, LogEvent, MODE_COLORS, get_flight_mode_info
+from uavlogviewer.parsers.base_parser import BaseParser, ParsedLog, FlightModeSpan, LogEvent, MODE_COLORS, get_flight_mode_info, is_valid_instance_column
 from uavlogviewer.parsers.fast_log_reader import parse_bin_log
 
 def is_binary_log(filepath: str) -> bool:
@@ -102,25 +102,68 @@ class DataflashParser(BaseParser):
                     time_col = c
                     break
 
-            if time_col:
-                t_arr = df[time_col].to_numpy(dtype=np.float64)
-                if 'US' in time_col or 'us' in time_col:
-                    t_arr /= 1e6
-                elif 'MS' in time_col or 'ms' in time_col:
-                    t_arr /= 1e3
+            inst_col = None
+            for c in ('C', 'I', 'Instance', 'instance', 'Inst', 'Core', 'Id', 'ID', 'Num'):
+                if c in df.columns and c != time_col:
+                    if is_valid_instance_column(mtype, c, df[c].to_numpy()):
+                        inst_col = c
+                        break
+
+            if inst_col is not None:
+                unique_insts = df[inst_col].unique()
+                for inst_val in unique_insts:
+                    sub_df = df[df[inst_col] == inst_val]
+                    if sub_df.empty:
+                        continue
+                    try:
+                        val_float = float(inst_val)
+                        if val_float.is_integer():
+                            inst_str = f"[{int(val_float)}]"
+                        else:
+                            inst_str = f"[{val_float}]"
+                    except (ValueError, TypeError):
+                        inst_str = f"[{inst_val}]"
+                    sub_mtype = f"{mtype}{inst_str}"
+
+                    if time_col:
+                        t_arr = sub_df[time_col].to_numpy(dtype=np.float64)
+                        if 'US' in time_col or 'us' in time_col:
+                            t_arr /= 1e6
+                        elif 'MS' in time_col or 'ms' in time_col:
+                            t_arr /= 1e3
+                    else:
+                        t_arr = np.arange(len(sub_df), dtype=np.float64)
+
+                    if len(t_arr) > 0:
+                        last_timestamp = max(last_timestamp, t_arr[-1])
+
+                    parsed.timestamps[sub_mtype] = t_arr
+                    fields = [col for col in sub_df.columns if col != time_col]
+                    parsed.field_tree[sub_mtype] = fields
+
+                    for f in fields:
+                        key = f"{sub_mtype}.{f}"
+                        parsed.time_series[key] = sub_df[f].to_numpy()
             else:
-                t_arr = np.arange(len(df), dtype=np.float64)
+                if time_col:
+                    t_arr = df[time_col].to_numpy(dtype=np.float64)
+                    if 'US' in time_col or 'us' in time_col:
+                        t_arr /= 1e6
+                    elif 'MS' in time_col or 'ms' in time_col:
+                        t_arr /= 1e3
+                else:
+                    t_arr = np.arange(len(df), dtype=np.float64)
 
-            if len(t_arr) > 0:
-                last_timestamp = max(last_timestamp, t_arr[-1])
+                if len(t_arr) > 0:
+                    last_timestamp = max(last_timestamp, t_arr[-1])
 
-            parsed.timestamps[mtype] = t_arr
-            fields = [col for col in df.columns if col != time_col]
-            parsed.field_tree[mtype] = fields
+                parsed.timestamps[mtype] = t_arr
+                fields = [col for col in df.columns if col != time_col]
+                parsed.field_tree[mtype] = fields
 
-            for f in fields:
-                key = f"{mtype}.{f}"
-                parsed.time_series[key] = df[f].to_numpy()
+                for f in fields:
+                    key = f"{mtype}.{f}"
+                    parsed.time_series[key] = df[f].to_numpy()
 
         # Update last flight mode end time if needed
         if parsed.flight_modes:
@@ -188,16 +231,50 @@ class DataflashParser(BaseParser):
                 raw_data[mtype][f].append(val)
 
         for mtype, field_dict in raw_data.items():
-            t_arr = np.array(raw_times[mtype], dtype=np.float64)
-            parsed.timestamps[mtype] = t_arr
-            parsed.field_tree[mtype] = list(field_dict.keys())
-            
-            for f, val_list in field_dict.items():
-                key = f"{mtype}.{f}"
-                try:
-                    parsed.time_series[key] = np.array(val_list)
-                except Exception:
-                    pass
+            t_list = raw_times[mtype]
+            inst_col = None
+            for c in ('C', 'I', 'Instance', 'instance', 'Inst', 'Core', 'Id', 'ID', 'Num'):
+                if c in field_dict:
+                    if is_valid_instance_column(mtype, c, field_dict[c]):
+                        inst_col = c
+                        break
+
+            if inst_col is not None:
+                inst_arr = np.array(field_dict[inst_col])
+                unique_insts = np.unique(inst_arr)
+                for inst_val in unique_insts:
+                    try:
+                        val_float = float(inst_val)
+                        if val_float.is_integer():
+                            inst_str = f"[{int(val_float)}]"
+                        else:
+                            inst_str = f"[{val_float}]"
+                    except (ValueError, TypeError):
+                        inst_str = f"[{inst_val}]"
+                    sub_mtype = f"{mtype}{inst_str}"
+
+                    mask = (inst_arr == inst_val)
+                    sub_t_arr = np.array(t_list, dtype=np.float64)[mask]
+                    parsed.timestamps[sub_mtype] = sub_t_arr
+                    parsed.field_tree[sub_mtype] = list(field_dict.keys())
+
+                    for f, val_list in field_dict.items():
+                        key = f"{sub_mtype}.{f}"
+                        try:
+                            parsed.time_series[key] = np.array(val_list)[mask]
+                        except Exception:
+                            pass
+            else:
+                t_arr = np.array(t_list, dtype=np.float64)
+                parsed.timestamps[mtype] = t_arr
+                parsed.field_tree[mtype] = list(field_dict.keys())
+                
+                for f, val_list in field_dict.items():
+                    key = f"{mtype}.{f}"
+                    try:
+                        parsed.time_series[key] = np.array(val_list)
+                    except Exception:
+                        pass
 
         if flight_mode_events:
             for i in range(len(flight_mode_events)):
