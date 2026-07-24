@@ -8,6 +8,17 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLineEdit,
 from PySide6.QtCore import Qt
 from typing import List, Dict, Any
 
+def clean_message_text(val: Any) -> str:
+    if isinstance(val, bytes):
+        txt = val.decode('utf-8', errors='ignore')
+    else:
+        txt = str(val)
+
+    txt = txt.strip()
+    if (txt.startswith("b'") and txt.endswith("'")) or (txt.startswith('b"') and txt.endswith('"')):
+        txt = txt[2:-1]
+    return txt.rstrip('\x00').strip()
+
 class MessageViewerDialog(QDialog):
     def __init__(self, text_messages: List[Dict[str, Any]], parent=None):
         super().__init__(parent)
@@ -39,7 +50,7 @@ class MessageViewerDialog(QDialog):
         for row, msg in enumerate(messages):
             self.table.insertRow(row)
             t_val = f"{msg.get('time', 0.0):.3f}"
-            txt_val = str(msg.get('text', ''))
+            txt_val = clean_message_text(msg.get('text', ''))
 
             item_t = QTableWidgetItem(t_val)
             item_txt = QTableWidgetItem(txt_val)

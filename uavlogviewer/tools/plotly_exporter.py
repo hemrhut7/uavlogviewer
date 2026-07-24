@@ -154,8 +154,9 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                         final_x = sanitize_array(final_x)
                         final_y = sanitize_array(final_y)
 
-                        if len(final_x) > 5000:
-                            step = max(1, len(final_x) // 5000)
+                        max_pts = getattr(chart, 'max_points', 5000)
+                        if max_pts > 0 and len(final_x) > max_pts:
+                            step = max(1, len(final_x) // max_pts)
                             scat_x, scat_y, scat_t = final_x[::step], final_y[::step], final_t[::step]
                         else:
                             scat_x, scat_y, scat_t = final_x, final_y, final_t
@@ -214,6 +215,9 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
             fig.update_xaxes(title_text=f"X: {last_x_key or 'None'}", showticklabels=True, row=r_scatter, col=1)
             fig.update_yaxes(title_text=f"Y: {last_y_key or 'None'}", secondary_y=False, row=r_scatter, col=1)
 
+            first_time_r = int(time_axis_ids[0].replace("xaxis", "")) if time_axis_ids[0] != "xaxis" else 1
+            first_match_key = "x" if first_time_r == 1 else f"x{first_time_r}"
+
             # Bound Timeline Row Y-Axis: No Y-ticks, no Y-label
             fig.update_yaxes(showticklabels=False, title_text="", showgrid=False, zeroline=False, row=r_timeline, col=1, secondary_y=False)
             fig.update_yaxes(showticklabels=False, title_text="", showgrid=False, zeroline=False, row=r_timeline, col=1, secondary_y=True)
@@ -224,8 +228,14 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
             else:
                 fig.update_xaxes(title_text="Time (seconds)", showticklabels=True, row=r_timeline, col=1)
 
+            if chart_store.sync_zoom and r_timeline != first_time_r:
+                fig.update_xaxes(matches=first_match_key, row=r_timeline, col=1)
+
         else:
             r_ts = chart_row_map[c_idx]['ts_row']
+            first_time_r = int(time_axis_ids[0].replace("xaxis", "")) if time_axis_ids[0] != "xaxis" else 1
+            first_match_key = "x" if first_time_r == 1 else f"x{first_time_r}"
+
             axis1_fields = []
             axis2_fields = []
 
@@ -280,6 +290,9 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                 fig.update_xaxes(showticklabels=False, row=r_ts, col=1)
             else:
                 fig.update_xaxes(showticklabels=True, title_text="Time (seconds)", row=r_ts, col=1)
+
+            if chart_store.sync_zoom and r_ts != first_time_r:
+                fig.update_xaxes(matches=first_match_key, row=r_ts, col=1)
 
             if parsed_log.flight_modes:
                 spans_to_draw = parsed_log.flight_modes[:100]

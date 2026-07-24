@@ -39,7 +39,7 @@ export const store = {
     mapLoading: false,
     plotLoading: false,
     timeRange: null,
-    syncZoom: true,
+    syncZoom: false,
     statsFullRange: true,
     textMessages: [],
     namedFloats: [],

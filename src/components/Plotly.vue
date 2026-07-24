@@ -369,10 +369,14 @@ export default {
                 let newRange = null
                 if (event['xaxis.range']) {
                     newRange = event['xaxis.range']
-                } else if (event['xaxis.range[0]']) {
+                } else if (event['xaxis.range[0]'] !== undefined && event['xaxis.range[1]'] !== undefined) {
                     newRange = [event['xaxis.range[0]'], event['xaxis.range[1]']]
                 } else if (event['xaxis.autorange']) {
-                    newRange = [this.gd.layout.xaxis.range[0], this.gd.layout.xaxis.range[1]]
+                    if (this.gd && this.gd._fullLayout && this.gd._fullLayout.xaxis && this.gd._fullLayout.xaxis.range) {
+                        newRange = [...this.gd._fullLayout.xaxis.range]
+                    } else if (this.gd && this.gd.layout && this.gd.layout.xaxis && this.gd.layout.xaxis.range) {
+                        newRange = [...this.gd.layout.xaxis.range]
+                    }
                 }
 
                 if (newRange) {
@@ -383,9 +387,9 @@ export default {
             }
         },
         syncTimeRange (timeRange, sourceIndex) {
-            if (this.state.syncZoom && sourceIndex !== this.chartIndex) {
+            if (this.state.syncZoom && sourceIndex !== this.chartIndex && this.gd) {
                 this.isSyncing = true
-                Plotly.relayout(this.gd, { 'xaxis.range': timeRange }).then(() => {
+                Plotly.relayout(this.gd, { 'xaxis.range': timeRange, 'xaxis.autorange': false }).then(() => {
                     this.isSyncing = false
                     this.addMaxMinMeanToTitles()
                 }).catch(() => {

@@ -10,12 +10,52 @@ import numpy as np
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QLineEdit, QTreeWidget, QTreeWidgetItem, QLabel,
                                QFileDialog, QGroupBox, QColorDialog, QComboBox,
-                               QTabWidget, QCheckBox, QScrollArea, QFrame, QRadioButton, QMessageBox)
+                               QTabWidget, QCheckBox, QScrollArea, QFrame, QRadioButton, QMessageBox,
+                               QMenu, QInputDialog)
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from typing import Dict, List, Optional
 from uavlogviewer.parsers.base_parser import ParsedLog, format_data_rate
 from uavlogviewer.models.chart_store import ChartStore, CalcBuilderState, DEFAULT_AXIS_COLORS
+from uavlogviewer.tools.plotly_exporter import truncate_text
+
+def find_sensor_vector_groups(parsed_log) -> dict:
+    if not parsed_log or not parsed_log.time_series:
+        return {}
+
+    all_keys = list(parsed_log.time_series.keys())
+    groups = {}
+
+    suffix_triples = [
+        ('AccX', 'AccY', 'AccZ', 'Acc'),
+        ('GyrX', 'GyrY', 'GyrZ', 'Gyr'),
+        ('MagX', 'MagY', 'MagZ', 'Mag'),
+        ('xacc', 'yacc', 'zacc', 'Acc'),
+        ('xgyro', 'ygyro', 'zgyro', 'Gyr'),
+        ('xmag', 'ymag', 'zmag', 'Mag'),
+        ('VN', 'VE', 'VD', 'Vel'),
+        ('PN', 'PE', 'PD', 'Pos'),
+        ('vx', 'vy', 'vz', 'Vel'),
+        ('x', 'y', 'z', 'Vector'),
+        ('X', 'Y', 'Z', 'Vector'),
+    ]
+
+    prefix_map = {}
+    for key in all_keys:
+        if '.' in key:
+            prefix, field = key.rsplit('.', 1)
+            if prefix not in prefix_map:
+                prefix_map[prefix] = {}
+            prefix_map[prefix][field] = key
+
+    for prefix, fields in prefix_map.items():
+        for x_s, y_s, z_s, label in suffix_triples:
+            if x_s in fields and y_s in fields and z_s in fields:
+                group_name = f"{prefix} - {label}"
+                if group_name not in groups:
+                    groups[group_name] = (fields[x_s], fields[y_s], fields[z_s])
+
+    return groups
 
 COMBO_BEAUTY_STYLE = """
 QComboBox {
@@ -331,6 +371,40 @@ class SidebarWidget(QWidget):
             if parent_match or child_match_count > 0:
                 parent.setExpanded(bool(query))
 
+    def show_xy_context_menu(self, pos, chart_idx: int):
+        chart = self.chart_store.charts[chart_idx]
+        if chart.chart_type != "scatter":
+            return
+
+        menu = QMenu(self)
+        title_str = "Unlimited" if chart.max_points <= 0 else f"{chart.max_points:,} pts"
+        title_act = menu.addAction(f"⚙️ Scatter Max Points Limit ({title_str})")
+        title_act.setEnabled(False)
+        menu.addSeparator()
+
+        limits = [1000, 5000, 10000, 50000, 0]
+        labels = ["1,000 pts", "5,000 pts (Default)", "10,000 pts", "50,000 pts", "Unlimited (All Points)"]
+
+        for limit, label in zip(limits, labels):
+            act = menu.addAction(label)
+            if chart.max_points == limit:
+                act.setCheckable(True)
+                act.setChecked(True)
+            act.triggered.connect(lambda _, l=limit, idx=chart_idx: self.chart_store.set_chart_max_points(idx, l))
+
+        menu.addSeparator()
+        custom_act = menu.addAction("Custom...")
+        custom_act.triggered.connect(lambda _, idx=chart_idx: self.prompt_custom_max_points(idx))
+
+        sender_widget = self.sender() if isinstance(self.sender(), QWidget) else self
+        menu.exec_(sender_widget.mapToGlobal(pos))
+
+    def prompt_custom_max_points(self, chart_idx: int):
+        chart = self.chart_store.charts[chart_idx]
+        val, ok = QInputDialog.getInt(self, "Max Scatter Points Limit", "Enter max points limit (0 for Unlimited):", value=chart.max_points, minValue=0, maxValue=1000000)
+        if ok:
+            self.chart_store.set_chart_max_points(chart_idx, val)
+
     def on_tree_item_double_clicked(self, item: QTreeWidgetItem, column: int):
         # Do not add category/parent nodes to plot
         if item.childCount() > 0 or item.parent() is None:
@@ -356,7 +430,12 @@ class SidebarWidget(QWidget):
 
         if chart.pending_builder is not None:
             builder = chart.pending_builder
-            if builder.active_operand == 'A':
+            if builder.operator == "norm":
+                if field_key not in builder.norm_operands:
+                    builder.norm_operands.append(field_key)
+                builder.active_norm_idx = len(builder.norm_operands) - 1
+                self.rebuild_setup_panel()
+            elif builder.active_operand == 'A':
                 builder.operand_a = field_key
                 builder.active_operand = 'B'
                 self.update_builder_operand_ui(target_idx)
@@ -365,6 +444,12 @@ class SidebarWidget(QWidget):
                 self.update_builder_operand_ui(target_idx)
         else:
             self.chart_store.add_expression(target_idx, field_key)
+
+    def remove_norm_operand(self, chart_idx: int, norm_idx: int):
+        chart = self.chart_store.charts[chart_idx]
+        if chart.pending_builder and 0 <= norm_idx < len(chart.pending_builder.norm_operands):
+            chart.pending_builder.norm_operands.pop(norm_idx)
+            self.rebuild_setup_panel()
 
     def on_add_chart_clicked(self):
         new_idx = self.chart_store.add_chart()
@@ -423,24 +508,13 @@ class SidebarWidget(QWidget):
             if self.current_input_op_b.text() != builder.operand_b:
                 self.current_input_op_b.setText(builder.operand_b)
 
-            is_unary = builder.operator in ["norm_ang(180)", "norm_ang(360)", "rad2deg", "deg2rad"]
+            is_unary = builder.operator in ["wrap_180", "wrap_360", "rad2deg", "deg2rad"]
             if is_unary:
                 self.current_input_op_b.setEnabled(False)
                 self.current_input_op_b.setPlaceholderText("(Unary operation)")
                 self.current_input_op_b.setStyleSheet(
                     "background: #f5f5f5; color: #a3a3a3; border: 1px solid #e5e5e5; border-radius: 4px; padding: 3px 6px; font-size: 11px;"
                 )
-            elif builder.operator == "downsample":
-                self.current_input_op_b.setEnabled(True)
-                self.current_input_op_b.setPlaceholderText("Factor N (e.g. 5)")
-                if builder.active_operand == 'B':
-                    self.current_input_op_b.setStyleSheet(
-                        "background: #fff7ed; color: #ea580c; font-weight: bold; border: 2px solid #ea580c; border-radius: 4px; padding: 3px 6px; font-size: 11px;"
-                    )
-                else:
-                    self.current_input_op_b.setStyleSheet(
-                        "background: #ffffff; color: #171717; border: 1px solid #cbd5e1; border-radius: 4px; padding: 3px 6px; font-size: 11px;"
-                    )
             else:
                 self.current_input_op_b.setEnabled(True)
                 self.current_input_op_b.setPlaceholderText("Field B or number...")
@@ -461,9 +535,28 @@ class SidebarWidget(QWidget):
 
     def on_operator_combo_changed(self, chart_idx: int, new_op: str):
         chart = self.chart_store.charts[chart_idx]
-        if chart.pending_builder:
-            chart.pending_builder.operator = new_op
-            self.update_builder_operand_ui(chart_idx)
+        builder = chart.pending_builder
+        if not builder:
+            return
+
+        builder.operator = new_op
+
+        if new_op == "norm":
+            if not builder.norm_operands:
+                ops = []
+                if builder.operand_a:
+                    ops.append(builder.operand_a)
+                if builder.operand_b and builder.operand_b not in ops:
+                    ops.append(builder.operand_b)
+                builder.norm_operands = ops
+        else:
+            if builder.norm_operands:
+                if len(builder.norm_operands) >= 1 and not builder.operand_a:
+                    builder.operand_a = builder.norm_operands[0]
+                if len(builder.norm_operands) >= 2 and not builder.operand_b:
+                    builder.operand_b = builder.norm_operands[1]
+
+        self.rebuild_setup_panel()
 
     def execute_inline_calc(self, chart_idx: int):
         chart = self.chart_store.charts[chart_idx]
@@ -471,168 +564,161 @@ class SidebarWidget(QWidget):
         if not builder or not self.parsed_log:
             return
 
-        field_a = builder.operand_a.strip()
-        if not field_a or field_a not in self.parsed_log.time_series:
-            QMessageBox.warning(self, "Invalid Selection", "Please click tree or plotted fields to select Field A.")
-            return
-
         op_str = builder.operator
-        UNARY_OPS = ["norm_ang(180)", "norm_ang(360)", "rad2deg", "deg2rad"]
+        UNARY_OPS = ["wrap_180", "wrap_360", "rad2deg", "deg2rad"]
 
-        # Fetch Field A timestamps and time series values
-        if field_a in self.parsed_log.timestamps:
-            t_a = self.parsed_log.timestamps[field_a]
-        else:
-            msg_a = field_a.split('.')[0] if '.' in field_a else "CALC"
-            t_a = self.parsed_log.timestamps.get(msg_a, np.array([]))
+        if op_str == "norm":
+            valid_fields = [f.strip() for f in builder.norm_operands if f.strip() in self.parsed_log.time_series]
+            if not valid_fields and builder.operand_a.strip() in self.parsed_log.time_series:
+                valid_fields = [builder.operand_a.strip()]
 
-        y_a = self.parsed_log.time_series[field_a]
-
-        if len(t_a) != len(y_a):
-            t_a = np.arange(len(y_a))
-
-        if op_str in UNARY_OPS:
-            t_base = t_a
-            if op_str == "norm_ang(180)":
-                y_res = (y_a + 180.0) % 360.0 - 180.0
-                res_name = f"norm_ang180({field_a})"
-            elif op_str == "norm_ang(360)":
-                y_res = y_a % 360.0
-                res_name = f"norm_ang360({field_a})"
-            elif op_str == "rad2deg":
-                y_res = y_a * (180.0 / np.pi)
-                res_name = f"rad2deg({field_a})"
-            elif op_str == "deg2rad":
-                y_res = y_a * (np.pi / 180.0)
-                res_name = f"deg2rad({field_a})"
-        elif op_str == "downsample":
-            operand_b = builder.operand_b.strip()
-            if not operand_b:
-                QMessageBox.warning(self, "Invalid Downsample Factor", "Please enter a downsample interval factor N (e.g. 5).")
+            if not valid_fields:
+                QMessageBox.warning(self, "Invalid Selection", "Please select at least 1 valid field for norm calculation.")
                 return
 
-            try:
-                raw_val = float(operand_b)
-                n_factor = int(round(raw_val))
-            except ValueError:
-                QMessageBox.warning(self, "Invalid Number", f"'{operand_b}' is not a valid numeric value.")
-                return
+            field_lengths = [(f, len(self.parsed_log.time_series[f])) for f in valid_fields]
+            field_lengths.sort(key=lambda x: x[1], reverse=True)
+            primary_field = field_lengths[0][0]
 
-            if n_factor <= 1:
-                QMessageBox.warning(self, "Invalid Downsample Factor", "Downsample factor N must be an integer greater than 1 (e.g. 2, 5, 10).")
-                return
-
-            t_base = t_a[::n_factor]
-            y_res = y_a[::n_factor]
-            res_name = f"downsample({field_a}, {n_factor})"
-        elif op_str == "ang_sub":
-            operand_b = builder.operand_b.strip()
-            if not operand_b:
-                QMessageBox.warning(self, "Invalid Selection", "Please select a field or enter a constant number for Operand B.")
-                return
-
-            if operand_b in self.parsed_log.time_series:
-                field_b = operand_b
-                if field_b in self.parsed_log.timestamps:
-                    t_b = self.parsed_log.timestamps[field_b]
-                else:
-                    msg_b = field_b.split('.')[0] if '.' in field_b else "CALC"
-                    t_b = self.parsed_log.timestamps.get(msg_b, np.array([]))
-
-                y_b = self.parsed_log.time_series[field_b]
-
-                if len(t_b) != len(y_b):
-                    t_b = np.arange(len(y_b))
-
-                # Interpolate yaw with unwrapping to lower sampling rate time base
-                if len(t_a) >= len(t_b):
-                    t_base = t_b
-                    y_a_rad = np.radians(y_a)
-                    y_a_unwrapped = np.unwrap(y_a_rad)
-                    y_a_interp_rad = np.interp(t_base, t_a, y_a_unwrapped) if len(t_a) > 0 else y_a_rad
-                    y_a_base = np.degrees(y_a_interp_rad)
-                    y_b_base = y_b
-                else:
-                    t_base = t_a
-                    y_b_rad = np.radians(y_b)
-                    y_b_unwrapped = np.unwrap(y_b_rad)
-                    y_b_interp_rad = np.interp(t_base, t_b, y_b_unwrapped) if len(t_b) > 0 else y_b_rad
-                    y_b_base = np.degrees(y_b_interp_rad)
-                    y_a_base = y_a
-
-                diff = y_a_base - y_b_base
-                y_res = (diff + 180.0) % 360.0 - 180.0
-                res_name = f"ang_sub({field_a}, {field_b})"
+            if primary_field in self.parsed_log.timestamps:
+                t_base = self.parsed_log.timestamps[primary_field]
             else:
-                try:
-                    k_val = float(operand_b)
-                except ValueError:
-                    QMessageBox.warning(self, "Invalid Operand B", f"'{operand_b}' is neither a valid telemetry field nor a numeric constant.")
+                msg_p = primary_field.split('.')[0] if '.' in primary_field else "CALC"
+                t_base = self.parsed_log.timestamps.get(msg_p, np.arange(field_lengths[0][1]))
+
+            arrays = []
+            for f in valid_fields:
+                y_arr = self.parsed_log.time_series[f]
+                if f in self.parsed_log.timestamps:
+                    t_f = self.parsed_log.timestamps[f]
+                else:
+                    msg_f = f.split('.')[0] if '.' in f else "CALC"
+                    t_f = self.parsed_log.timestamps.get(msg_f, np.arange(len(y_arr)))
+
+                if len(y_arr) == len(t_base) and np.array_equal(t_f, t_base):
+                    arrays.append(y_arr)
+                else:
+                    interp_y = np.interp(t_base, t_f, y_arr) if len(t_f) > 0 else y_arr
+                    arrays.append(interp_y)
+
+            y_res = np.sqrt(sum(a**2 for a in arrays))
+            res_name = f"norm({', '.join(valid_fields)})"
+
+        else:
+            field_a = builder.operand_a.strip()
+            if not field_a or field_a not in self.parsed_log.time_series:
+                QMessageBox.warning(self, "Invalid Selection", "Please click tree or plotted fields to select Field A.")
+                return
+
+            if field_a in self.parsed_log.timestamps:
+                t_a = self.parsed_log.timestamps[field_a]
+            else:
+                msg_a = field_a.split('.')[0] if '.' in field_a else "CALC"
+                t_a = self.parsed_log.timestamps.get(msg_a, np.array([]))
+
+            y_a = self.parsed_log.time_series[field_a]
+
+            if len(t_a) != len(y_a):
+                t_a = np.arange(len(y_a))
+
+            if op_str in UNARY_OPS:
+                t_base = t_a
+                if op_str == "wrap_180":
+                    y_res = (y_a + 180.0) % 360.0 - 180.0
+                    res_name = f"wrap_180({field_a})"
+                elif op_str == "wrap_360":
+                    y_res = y_a % 360.0
+                    res_name = f"wrap_360({field_a})"
+                elif op_str == "rad2deg":
+                    y_res = y_a * (180.0 / np.pi)
+                    res_name = f"rad2deg({field_a})"
+                elif op_str == "deg2rad":
+                    y_res = y_a * (np.pi / 180.0)
+                    res_name = f"deg2rad({field_a})"
+            elif op_str == "ang_sub":
+                operand_b = builder.operand_b.strip()
+                if not operand_b:
+                    QMessageBox.warning(self, "Invalid Selection", "Please select a field or enter a constant number for Operand B.")
                     return
 
-                t_base = t_a
-                diff = y_a - k_val
-                y_res = (diff + 180.0) % 360.0 - 180.0
-                res_name = f"ang_sub({field_a}, {operand_b})"
-        else:
-            operand_b = builder.operand_b.strip()
-            if not operand_b:
-                QMessageBox.warning(self, "Invalid Selection", "Please select a field or enter a constant number for Operand B.")
-                return
+                if operand_b in self.parsed_log.time_series:
+                    field_b = operand_b
+                    t_b = self.parsed_log.timestamps.get(field_b, self.parsed_log.timestamps.get(field_b.split('.')[0], np.array([])))
+                    y_b = self.parsed_log.time_series[field_b]
+                    if len(t_b) != len(y_b): t_b = np.arange(len(y_b))
 
-            if operand_b in self.parsed_log.time_series:
-                field_b = operand_b
-                if field_b in self.parsed_log.timestamps:
-                    t_b = self.parsed_log.timestamps[field_b]
+                    if len(t_a) >= len(t_b):
+                        t_base = t_b
+                        y_a_rad = np.radians(y_a)
+                        y_a_unwrapped = np.unwrap(y_a_rad)
+                        y_a_interp_rad = np.interp(t_base, t_a, y_a_unwrapped) if len(t_a) > 0 else y_a_rad
+                        y_a_base = np.degrees(y_a_interp_rad)
+                        y_b_base = y_b
+                    else:
+                        t_base = t_a
+                        y_b_rad = np.radians(y_b)
+                        y_b_unwrapped = np.unwrap(y_b_rad)
+                        y_b_interp_rad = np.interp(t_base, t_b, y_b_unwrapped) if len(t_b) > 0 else y_b_rad
+                        y_b_base = np.degrees(y_b_interp_rad)
+                        y_a_base = y_a
+
+                    diff = y_a_base - y_b_base
+                    y_res = (diff + 180.0) % 360.0 - 180.0
+                    res_name = f"ang_sub({field_a}, {field_b})"
                 else:
-                    msg_b = field_b.split('.')[0] if '.' in field_b else "CALC"
-                    t_b = self.parsed_log.timestamps.get(msg_b, np.array([]))
+                    try:
+                        k_val = float(operand_b)
+                    except ValueError:
+                        QMessageBox.warning(self, "Invalid Operand B", f"'{operand_b}' is neither a valid telemetry field nor a numeric constant.")
+                        return
 
-                y_b = self.parsed_log.time_series[field_b]
-
-                if len(t_b) != len(y_b):
-                    t_b = np.arange(len(y_b))
-
-                # Interpolation rule: Interpolate higher rate series down to the lower rate time base
-                if len(t_a) >= len(t_b):
-                    t_base = t_b
-                    y_a_interp = np.interp(t_base, t_a, y_a) if len(t_a) > 0 else y_a
-                    y_b_base = y_b
-                    y_a_base = y_a_interp
-                else:
                     t_base = t_a
-                    y_b_interp = np.interp(t_base, t_b, y_b) if len(t_b) > 0 else y_b
-                    y_a_base = y_a
-                    y_b_base = y_b_interp
-
-                if op_str == "+":
-                    y_res = y_a_base + y_b_base
-                elif op_str == "-":
-                    y_res = y_a_base - y_b_base
-                elif op_str == "*":
-                    y_res = y_a_base * y_b_base
-                elif op_str == "/":
-                    y_res = np.where(y_b_base != 0, y_a_base / y_b_base, np.nan)
-
-                res_name = f"{field_a} {op_str} {field_b}"
+                    diff = y_a - k_val
+                    y_res = (diff + 180.0) % 360.0 - 180.0
+                    res_name = f"ang_sub({field_a}, {operand_b})"
             else:
-                try:
-                    k_val = float(operand_b)
-                except ValueError:
-                    QMessageBox.warning(self, "Invalid Operand B", f"'{operand_b}' is neither a valid telemetry field nor a numeric constant.")
+                operand_b = builder.operand_b.strip()
+                if not operand_b:
+                    QMessageBox.warning(self, "Invalid Selection", "Please select a field or enter a constant number for Operand B.")
                     return
 
-                t_base = t_a
-                if op_str == "+":
-                    y_res = y_a + k_val
-                elif op_str == "-":
-                    y_res = y_a - k_val
-                elif op_str == "*":
-                    y_res = y_a * k_val
-                elif op_str == "/":
-                    y_res = y_a / k_val if k_val != 0 else np.full_like(y_a, np.nan)
+                if operand_b in self.parsed_log.time_series:
+                    field_b = operand_b
+                    t_b = self.parsed_log.timestamps.get(field_b, self.parsed_log.timestamps.get(field_b.split('.')[0], np.array([])))
+                    y_b = self.parsed_log.time_series[field_b]
+                    if len(t_b) != len(y_b): t_b = np.arange(len(y_b))
 
-                res_name = f"{field_a} {op_str} {operand_b}"
+                    if len(t_a) >= len(t_b):
+                        t_base = t_b
+                        y_a_interp = np.interp(t_base, t_a, y_a) if len(t_a) > 0 else y_a
+                        y_b_base = y_b
+                        y_a_base = y_a_interp
+                    else:
+                        t_base = t_a
+                        y_b_interp = np.interp(t_base, t_b, y_b) if len(t_b) > 0 else y_b
+                        y_a_base = y_a
+                        y_b_base = y_b_interp
+
+                    if op_str == "+": y_res = y_a_base + y_b_base
+                    elif op_str == "-": y_res = y_a_base - y_b_base
+                    elif op_str == "*": y_res = y_a_base * y_b_base
+                    elif op_str == "/": y_res = np.where(y_b_base != 0, y_a_base / y_b_base, np.nan)
+
+                    res_name = f"{field_a} {op_str} {field_b}"
+                else:
+                    try:
+                        k_val = float(operand_b)
+                    except ValueError:
+                        QMessageBox.warning(self, "Invalid Operand B", f"'{operand_b}' is neither a valid telemetry field nor a numeric constant.")
+                        return
+
+                    t_base = t_a
+                    if op_str == "+": y_res = y_a + k_val
+                    elif op_str == "-": y_res = y_a - k_val
+                    elif op_str == "*": y_res = y_a * k_val
+                    elif op_str == "/": y_res = y_a / k_val if k_val != 0 else np.full_like(y_a, np.nan)
+
+                    res_name = f"{field_a} {op_str} {operand_b}"
 
         # Store calculated result & timestamps
         self.parsed_log.time_series[res_name] = y_res
@@ -688,6 +774,9 @@ class SidebarWidget(QWidget):
                         QFrame { background-color: #ffffff; border: 1px solid #e5e5e5; border-radius: 6px; margin-bottom: 8px; }
                     """)
 
+                card.setContextMenuPolicy(Qt.CustomContextMenu)
+                card.customContextMenuRequested.connect(lambda pos, c_i=c_idx: self.show_xy_context_menu(pos, c_i))
+
                 card_layout = QVBoxLayout(card)
                 card_layout.setContentsMargins(8, 8, 8, 8)
 
@@ -698,6 +787,13 @@ class SidebarWidget(QWidget):
                 radio_btn.toggled.connect(lambda checked, idx=c_idx: checked and self.set_active_chart(idx))
                 h_layout.addWidget(radio_btn)
                 h_layout.addStretch()
+
+                pts_str = "Unlimited" if chart.max_points <= 0 else f"{chart.max_points:,} pts"
+                btn_pts = QPushButton(f"⚙️ {pts_str}")
+                btn_pts.setToolTip("Right-click card or click here to adjust max render points limit")
+                btn_pts.setStyleSheet("background: transparent; color: #ea580c; border: 1px solid #fed7aa; border-radius: 3px; font-size: 10px; padding: 1px 5px;")
+                btn_pts.clicked.connect(lambda _, c_i=c_idx: self.prompt_custom_max_points(c_i))
+                h_layout.addWidget(btn_pts)
 
                 if len(self.chart_store.charts) > 1:
                     btn_rm_chart = QPushButton("❌")
@@ -806,12 +902,13 @@ class SidebarWidget(QWidget):
                     r_layout.setContentsMargins(0, 2, 0, 2)
                     r_layout.setAlignment(Qt.AlignVCenter)
 
-                    # Expression Name Label (Clickable for secondary calculations!)
-                    name_lbl = ClickableLabel(expr.name)
+                    # Expression Name Label (Truncate if long, full text in tooltip!)
+                    disp_name = truncate_text(expr.name, max_len=22)
+                    name_lbl = ClickableLabel(disp_name)
                     name_lbl.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
                     name_lbl.setCursor(Qt.PointingHandCursor)
                     name_lbl.setStyleSheet("color: #171717; font-weight: bold; font-size: 11px;")
-                    name_lbl.setToolTip("Click to select field for math calculation")
+                    name_lbl.setToolTip(f"{expr.name}\n(Click to select field for math calculation)")
                     name_lbl.clicked.connect(lambda f=expr.name: self.on_field_selected_for_calc(f))
                     r_layout.addWidget(name_lbl, stretch=2)
 
@@ -848,46 +945,100 @@ class SidebarWidget(QWidget):
             if chart.pending_builder is not None:
                 builder = chart.pending_builder
 
-                b_row = QWidget()
-                b_layout = QHBoxLayout(b_row)
-                b_layout.setContentsMargins(0, 4, 0, 4)
-                b_layout.setAlignment(Qt.AlignVCenter)
+                if builder.operator == "norm":
+                    b_row = QWidget()
+                    b_layout = QVBoxLayout(b_row)
+                    b_layout.setContentsMargins(0, 4, 0, 4)
 
-                # Object 1: Operand A Button / Selection Box
-                self.current_btn_op_a = QPushButton(builder.operand_a or "Field A (Click tree)...")
-                self.current_btn_op_a.clicked.connect(lambda _, c=c_idx: self.select_operand_target_ui(c, 'A'))
-                b_layout.addWidget(self.current_btn_op_a, stretch=2)
+                    title_lbl = QLabel("norm( Field 1, Field 2, ... ) = √(f₁² + f₂² + ...)")
+                    title_lbl.setStyleSheet("font-weight: bold; color: #0d9488; font-size: 11px;")
+                    b_layout.addWidget(title_lbl)
 
-                # Object 2: Beautified Operator Dropdown
-                combo_op = QComboBox()
-                combo_op.addItems(["+", "-", "*", "/", "norm_ang(180)", "norm_ang(360)", "rad2deg", "deg2rad", "downsample", "ang_sub"])
-                combo_op.setCurrentText(builder.operator)
-                combo_op.setStyleSheet(OPERATOR_COMBO_STYLE)
-                combo_op.currentTextChanged.connect(lambda text, c=c_idx: self.on_operator_combo_changed(c, text))
-                b_layout.addWidget(combo_op)
+                    fields_w = QWidget()
+                    f_layout = QHBoxLayout(fields_w)
+                    f_layout.setContentsMargins(0, 2, 0, 2)
 
-                # Object 3: Operand B FocusLineEdit (Fully editable by direct typing OR clicking tree/plotted fields)
-                self.current_input_op_b = FocusLineEdit(builder.operand_b)
-                self.current_input_op_b.focused.connect(lambda c=c_idx: self.select_operand_target_ui(c, 'B'))
-                self.current_input_op_b.textChanged.connect(lambda text: setattr(builder, 'operand_b', text))
-                b_layout.addWidget(self.current_input_op_b, stretch=2)
+                    if not builder.norm_operands:
+                        no_f_lbl = QLabel("Click fields in tree to add to norm...")
+                        no_f_lbl.setStyleSheet("color: #a3a3a3; font-style: italic; font-size: 11px;")
+                        f_layout.addWidget(no_f_lbl)
 
-                # Apply initial UI styling for builder row
-                self.update_builder_operand_ui(c_idx)
+                    for f_i, f_name in enumerate(builder.norm_operands):
+                        btn_f = QPushButton(f_name)
+                        btn_f.setStyleSheet("background: #f0fdfa; color: #0d9488; font-weight: bold; border: 1px solid #0d9488; border-radius: 4px; padding: 3px 6px; font-size: 11px;")
+                        f_layout.addWidget(btn_f)
 
-                # Object 4: OK Button
-                btn_ok = QPushButton("OK")
-                btn_ok.setStyleSheet("background: #0d9488; color: #ffffff; font-weight: bold; border: none; border-radius: 4px; padding: 3px 8px; font-size: 11px;")
-                btn_ok.clicked.connect(lambda _, c=c_idx: self.execute_inline_calc(c))
-                b_layout.addWidget(btn_ok)
+                        btn_del_f = QPushButton("❌")
+                        btn_del_f.setStyleSheet("background: transparent; color: #ef4444; border: none; font-size: 10px; font-weight: bold;")
+                        btn_del_f.clicked.connect(lambda _, idx=f_i, c=c_idx: self.remove_norm_operand(c, idx))
+                        f_layout.addWidget(btn_del_f)
 
-                # Object 5: Cancel Button
-                btn_cancel = QPushButton("Cancel")
-                btn_cancel.setStyleSheet("background: #f5f5f5; color: #ef4444; border: 1px solid #cbd5e1; font-weight: bold; border-radius: 4px; padding: 3px 8px; font-size: 11px;")
-                btn_cancel.clicked.connect(lambda _, c=c_idx: self.cancel_inline_builder(c))
-                b_layout.addWidget(btn_cancel)
+                    b_layout.addWidget(fields_w)
 
-                card_layout.addWidget(b_row)
+                    ctrl_w = QWidget()
+                    ctrl_layout = QHBoxLayout(ctrl_w)
+                    ctrl_layout.setContentsMargins(0, 2, 0, 2)
+
+                    combo_op = QComboBox()
+                    combo_op.addItems(["+", "-", "*", "/", "norm", "wrap_180", "wrap_360", "rad2deg", "deg2rad", "ang_sub"])
+                    combo_op.setCurrentText("norm")
+                    combo_op.setStyleSheet(OPERATOR_COMBO_STYLE)
+                    combo_op.currentTextChanged.connect(lambda text, c=c_idx: self.on_operator_combo_changed(c, text))
+                    ctrl_layout.addWidget(combo_op)
+
+                    btn_ok = QPushButton("OK")
+                    btn_ok.setStyleSheet("background: #0d9488; color: #ffffff; font-weight: bold; border: none; border-radius: 4px; padding: 3px 8px; font-size: 11px;")
+                    btn_ok.clicked.connect(lambda _, c=c_idx: self.execute_inline_calc(c))
+                    ctrl_layout.addWidget(btn_ok)
+
+                    btn_cancel = QPushButton("Cancel")
+                    btn_cancel.setStyleSheet("background: #f5f5f5; color: #ef4444; border: 1px solid #cbd5e1; font-weight: bold; border-radius: 4px; padding: 3px 8px; font-size: 11px;")
+                    btn_cancel.clicked.connect(lambda _, c=c_idx: self.cancel_inline_builder(c))
+                    ctrl_layout.addWidget(btn_cancel)
+
+                    b_layout.addWidget(ctrl_w)
+                    card_layout.addWidget(b_row)
+                else:
+                    b_row = QWidget()
+                    b_layout = QHBoxLayout(b_row)
+                    b_layout.setContentsMargins(0, 4, 0, 4)
+                    b_layout.setAlignment(Qt.AlignVCenter)
+
+                    # Object 1: Operand A Button / Selection Box
+                    self.current_btn_op_a = QPushButton(builder.operand_a or "Field A (Click tree)...")
+                    self.current_btn_op_a.clicked.connect(lambda _, c=c_idx: self.select_operand_target_ui(c, 'A'))
+                    b_layout.addWidget(self.current_btn_op_a, stretch=2)
+
+                    # Object 2: Beautified Operator Dropdown
+                    combo_op = QComboBox()
+                    combo_op.addItems(["+", "-", "*", "/", "norm", "wrap_180", "wrap_360", "rad2deg", "deg2rad", "ang_sub"])
+                    combo_op.setCurrentText(builder.operator)
+                    combo_op.setStyleSheet(OPERATOR_COMBO_STYLE)
+                    combo_op.currentTextChanged.connect(lambda text, c=c_idx: self.on_operator_combo_changed(c, text))
+                    b_layout.addWidget(combo_op)
+
+                    # Object 3: Operand B FocusLineEdit
+                    self.current_input_op_b = FocusLineEdit(builder.operand_b)
+                    self.current_input_op_b.focused.connect(lambda c=c_idx: self.select_operand_target_ui(c, 'B'))
+                    self.current_input_op_b.textChanged.connect(lambda text: setattr(builder, 'operand_b', text))
+                    b_layout.addWidget(self.current_input_op_b, stretch=2)
+
+                    # Apply initial UI styling for builder row
+                    self.update_builder_operand_ui(c_idx)
+
+                    # Object 4: OK Button
+                    btn_ok = QPushButton("OK")
+                    btn_ok.setStyleSheet("background: #0d9488; color: #ffffff; font-weight: bold; border: none; border-radius: 4px; padding: 3px 8px; font-size: 11px;")
+                    btn_ok.clicked.connect(lambda _, c=c_idx: self.execute_inline_calc(c))
+                    b_layout.addWidget(btn_ok)
+
+                    # Object 5: Cancel Button
+                    btn_cancel = QPushButton("Cancel")
+                    btn_cancel.setStyleSheet("background: #f5f5f5; color: #ef4444; border: 1px solid #cbd5e1; font-weight: bold; border-radius: 4px; padding: 3px 8px; font-size: 11px;")
+                    btn_cancel.clicked.connect(lambda _, c=c_idx: self.cancel_inline_builder(c))
+                    b_layout.addWidget(btn_cancel)
+
+                    card_layout.addWidget(b_row)
             else:
                 # Math Calculation Button at the bottom of each Chart card
                 btn_calc = QPushButton(f"🧮 Calculate Data for Chart #{c_idx + 1}")

@@ -14,10 +14,12 @@ DEFAULT_AXIS_COLORS = [
 
 class CalcBuilderState:
     def __init__(self):
-        self.active_operand: str = 'A'  # 'A' or 'B'
+        self.active_operand: str = 'A'  # 'A', 'B', etc.
         self.operand_a: str = ''
-        self.operator: str = '*'        # '+', '-', '*', '/'
+        self.operator: str = '+'        # '+', '-', '*', '/', 'norm', 'wrap_180', 'wrap_360', 'rad2deg', 'deg2rad', 'ang_sub'
         self.operand_b: str = ''
+        self.norm_operands: List[str] = []
+        self.active_norm_idx: int = 0
 
 class ChartItem:
     def __init__(self, name: str, axis: int = 0, color: str = None):
@@ -41,6 +43,7 @@ class ChartPanel:
         self.pairs: List[XYScatterPair] = []
         self.active_pair_idx: int = 0
         self.active_xy_target: str = 'X'  # 'X' or 'Y'
+        self.max_points: int = 5000  # Default max rendering points limit for scatter
 
     @property
     def x_field(self) -> str:
@@ -69,7 +72,7 @@ class ChartStore(QObject):
 
     def __init__(self):
         super().__init__()
-        self.sync_zoom: bool = True
+        self.sync_zoom: bool = False
         self.stats_full_range: bool = True
         self.charts: List[ChartPanel] = [ChartPanel("Chart 1")]
 
@@ -186,6 +189,11 @@ class ChartStore(QObject):
                 if e.name == expr_name:
                     e.color = color
                     break
+            self.updated.emit()
+
+    def set_chart_max_points(self, chart_idx: int, max_pts: int):
+        if 0 <= chart_idx < len(self.charts):
+            self.charts[chart_idx].max_points = max_pts
             self.updated.emit()
 
     def set_xy_field(self, chart_idx: int, target: str, field_name: str):
