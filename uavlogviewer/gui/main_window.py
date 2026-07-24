@@ -136,6 +136,7 @@ class MainWindow(QMainWindow):
 
         # Right Main Plot Container
         self.plot_container = PlotContainer(self.chart_store)
+        self.plot_container.point_alt_clicked.connect(self.on_chart_alt_clicked)
         self.splitter.addWidget(self.plot_container)
 
         self.splitter.setSizes([380, 1000])
@@ -229,3 +230,10 @@ class MainWindow(QMainWindow):
         self.sidebar.populate_field_tree(self.parsed_log)
         self.chart_store.add_expression(0, result_key)
         self.status_bar.showMessage(f"Calculated expression field '{result_key}' added to plot.")
+
+    def on_chart_alt_clicked(self, timestamp: float):
+        if not self.parsed_log:
+            return
+        self.open_message_viewer()
+        if self.message_dialog:
+            self.message_dialog.scroll_to_timestamp(timestamp)

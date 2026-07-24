@@ -393,6 +393,22 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                         }}
                     }}
                 }});
+                gd.on('plotly_click', function(data) {{
+                    if (data && data.points && data.points.length > 0) {{
+                        var pt = data.points[0];
+                        var clickTime = pt.x;
+                        if (pt.customdata !== undefined && pt.customdata !== null) {{
+                            clickTime = pt.customdata;
+                        }}
+                        var isAltKey = false;
+                        if (data.event && (data.event.altKey || data.event.metaKey)) {{
+                            isAltKey = true;
+                        }}
+                        if (isAltKey && clickTime !== undefined && clickTime !== null) {{
+                            document.title = "CLICK_TIME:" + clickTime;
+                        }}
+                    }}
+                }});
             }}
         }}, 100);
     }});

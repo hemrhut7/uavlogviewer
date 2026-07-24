@@ -9,6 +9,7 @@ import os
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
                                QTableWidgetItem, QHeaderView, QGroupBox)
 from PySide6.QtCore import QUrl, Qt
+from PySide6.QtCore import QUrl, Qt, Signal
 from PySide6.QtGui import QPalette, QColor
 from PySide6.QtWebEngineWidgets import QWebEngineView
 import numpy as np
@@ -18,6 +19,8 @@ from uavlogviewer.models.chart_store import ChartStore
 from uavlogviewer.tools.plotly_exporter import generate_plotly_html
 
 class PlotContainer(QWidget):
+    point_alt_clicked = Signal(float)
+
     def __init__(self, chart_store: ChartStore, parent=None):
         super().__init__(parent)
         self.chart_store = chart_store
@@ -110,7 +113,18 @@ class PlotContainer(QWidget):
             print(f"Error updating Plotly viewport: {e}")
 
     def on_web_title_changed(self, title: str):
-        if not title or not title.startswith("RANGE:") or not self.parsed_log:
+        if not title:
+            return
+
+        if title.startswith("CLICK_TIME:"):
+            try:
+                t_val = float(title.split(":")[1])
+                self.point_alt_clicked.emit(t_val)
+            except ValueError:
+                pass
+            return
+
+        if not title.startswith("RANGE:") or not self.parsed_log:
             return
 
         has_scatter = any(c.chart_type == "scatter" for c in self.chart_store.charts)
