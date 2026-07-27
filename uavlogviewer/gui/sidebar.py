@@ -966,7 +966,7 @@ class SidebarWidget(QWidget):
                     fields_w = QWidget()
                     f_layout = QHBoxLayout(fields_w)
                     f_layout.setContentsMargins(0, 2, 0, 2)
-                    f_layout.setSpacing(4)
+                    f_layout.setSpacing(6)
 
                     if not builder.norm_operands:
                         no_f_lbl = QLabel("Click fields in tree to add to norm...")
@@ -974,14 +974,43 @@ class SidebarWidget(QWidget):
                         f_layout.addWidget(no_f_lbl)
 
                     for f_i, f_name in enumerate(builder.norm_operands):
-                        btn_f = QPushButton(f_name)
-                        btn_f.setStyleSheet("background: #ffffff; color: #0d9488; font-weight: bold; border: 1px solid #0d9488; border-radius: 4px; padding: 3px 6px; font-size: 11px;")
-                        f_layout.addWidget(btn_f)
+                        chip_frame = QFrame()
+                        chip_frame.setStyleSheet("""
+                            QFrame {
+                                background-color: #ffffff;
+                                border: 1px solid #0d9488;
+                                border-radius: 10px;
+                            }
+                        """)
+                        chip_layout = QHBoxLayout(chip_frame)
+                        chip_layout.setContentsMargins(6, 2, 4, 2)
+                        chip_layout.setSpacing(2)
+
+                        lbl_f = QLabel(f_name)
+                        lbl_f.setStyleSheet("color: #0d9488; font-weight: bold; font-size: 11px; border: none; background: transparent;")
+                        chip_layout.addWidget(lbl_f)
 
                         btn_del_f = QPushButton("✕")
-                        btn_del_f.setStyleSheet("background: transparent; color: #ef4444; border: none; font-size: 10px; font-weight: bold;")
+                        btn_del_f.setCursor(Qt.PointingHandCursor)
+                        btn_del_f.setStyleSheet("""
+                            QPushButton {
+                                background: transparent;
+                                color: #94a3b8;
+                                border: none;
+                                font-size: 10px;
+                                font-weight: bold;
+                                padding: 0px 2px;
+                            }
+                            QPushButton:hover {
+                                color: #ef4444;
+                            }
+                        """)
                         btn_del_f.clicked.connect(lambda _, idx=f_i, c=c_idx: self.remove_norm_operand(c, idx))
-                        f_layout.addWidget(btn_del_f)
+                        chip_layout.addWidget(btn_del_f)
+
+                        f_layout.addWidget(chip_frame)
+
+                    f_layout.addStretch()
 
                     b_layout.addWidget(fields_w)
 
