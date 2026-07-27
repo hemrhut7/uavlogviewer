@@ -95,8 +95,9 @@ QComboBox {
     font-size: 11px;
     border: 1px solid #0d9488;
     border-radius: 4px;
-    padding: 2px 6px;
-    min-width: 85px;
+    padding: 2px 4px;
+    min-width: 48px;
+    max-width: 65px;
 }
 QComboBox:hover {
     background-color: #f0fdfa;
@@ -104,7 +105,7 @@ QComboBox:hover {
 }
 QComboBox::drop-down {
     border: none;
-    width: 14px;
+    width: 12px;
 }
 QComboBox QAbstractItemView {
     background-color: #ffffff;
@@ -494,7 +495,7 @@ class SidebarWidget(QWidget):
             return
 
         if self.current_btn_op_a:
-            self.current_btn_op_a.setText(builder.operand_a or "Field A (Click tree)...")
+            self.current_btn_op_a.setText(builder.operand_a or "Field A")
             if builder.active_operand == 'A':
                 self.current_btn_op_a.setStyleSheet(
                     "background: #f0fdfa; color: #0d9488; font-weight: bold; border: 2px solid #0d9488; border-radius: 4px; padding: 3px 6px; font-size: 11px;"
@@ -946,17 +947,26 @@ class SidebarWidget(QWidget):
                 builder = chart.pending_builder
 
                 if builder.operator == "norm":
-                    b_row = QWidget()
-                    b_layout = QVBoxLayout(b_row)
-                    b_layout.setContentsMargins(0, 4, 0, 4)
+                    b_card = QFrame()
+                    b_card.setStyleSheet("""
+                        QFrame {
+                            background-color: #f0fdfa;
+                            border: 1px solid #99f6e4;
+                            border-radius: 6px;
+                        }
+                    """)
+                    b_layout = QVBoxLayout(b_card)
+                    b_layout.setContentsMargins(8, 8, 8, 8)
+                    b_layout.setSpacing(6)
 
-                    title_lbl = QLabel("norm( Field 1, Field 2, ... ) = √(f₁² + f₂² + ...)")
+                    title_lbl = QLabel("📐 norm( F₁, F₂, ... ) = √(F₁² + F₂² + ...)")
                     title_lbl.setStyleSheet("font-weight: bold; color: #0d9488; font-size: 11px;")
                     b_layout.addWidget(title_lbl)
 
                     fields_w = QWidget()
                     f_layout = QHBoxLayout(fields_w)
                     f_layout.setContentsMargins(0, 2, 0, 2)
+                    f_layout.setSpacing(4)
 
                     if not builder.norm_operands:
                         no_f_lbl = QLabel("Click fields in tree to add to norm...")
@@ -965,10 +975,10 @@ class SidebarWidget(QWidget):
 
                     for f_i, f_name in enumerate(builder.norm_operands):
                         btn_f = QPushButton(f_name)
-                        btn_f.setStyleSheet("background: #f0fdfa; color: #0d9488; font-weight: bold; border: 1px solid #0d9488; border-radius: 4px; padding: 3px 6px; font-size: 11px;")
+                        btn_f.setStyleSheet("background: #ffffff; color: #0d9488; font-weight: bold; border: 1px solid #0d9488; border-radius: 4px; padding: 3px 6px; font-size: 11px;")
                         f_layout.addWidget(btn_f)
 
-                        btn_del_f = QPushButton("❌")
+                        btn_del_f = QPushButton("✕")
                         btn_del_f.setStyleSheet("background: transparent; color: #ef4444; border: none; font-size: 10px; font-weight: bold;")
                         btn_del_f.clicked.connect(lambda _, idx=f_i, c=c_idx: self.remove_norm_operand(c, idx))
                         f_layout.addWidget(btn_del_f)
@@ -978,6 +988,7 @@ class SidebarWidget(QWidget):
                     ctrl_w = QWidget()
                     ctrl_layout = QHBoxLayout(ctrl_w)
                     ctrl_layout.setContentsMargins(0, 2, 0, 2)
+                    ctrl_layout.setSpacing(6)
 
                     combo_op = QComboBox()
                     combo_op.addItems(["+", "-", "*", "/", "norm", "wrap_180", "wrap_360", "rad2deg", "deg2rad", "ang_sub"])
@@ -986,59 +997,84 @@ class SidebarWidget(QWidget):
                     combo_op.currentTextChanged.connect(lambda text, c=c_idx: self.on_operator_combo_changed(c, text))
                     ctrl_layout.addWidget(combo_op)
 
-                    btn_ok = QPushButton("OK")
-                    btn_ok.setStyleSheet("background: #0d9488; color: #ffffff; font-weight: bold; border: none; border-radius: 4px; padding: 3px 8px; font-size: 11px;")
-                    btn_ok.clicked.connect(lambda _, c=c_idx: self.execute_inline_calc(c))
-                    ctrl_layout.addWidget(btn_ok)
-
                     btn_cancel = QPushButton("Cancel")
-                    btn_cancel.setStyleSheet("background: #f5f5f5; color: #ef4444; border: 1px solid #cbd5e1; font-weight: bold; border-radius: 4px; padding: 3px 8px; font-size: 11px;")
+                    btn_cancel.setStyleSheet("background: #ffffff; color: #64748b; border: 1px solid #cbd5e1; font-weight: bold; border-radius: 4px; padding: 4px 8px; font-size: 11px;")
                     btn_cancel.clicked.connect(lambda _, c=c_idx: self.cancel_inline_builder(c))
                     ctrl_layout.addWidget(btn_cancel)
 
+                    btn_ok = QPushButton("✓ Calculate Norm")
+                    btn_ok.setStyleSheet("background: #0d9488; color: #ffffff; font-weight: bold; border: none; border-radius: 4px; padding: 4px 12px; font-size: 11px;")
+                    btn_ok.clicked.connect(lambda _, c=c_idx: self.execute_inline_calc(c))
+                    ctrl_layout.addWidget(btn_ok, stretch=1)
+
                     b_layout.addWidget(ctrl_w)
-                    card_layout.addWidget(b_row)
+
+                    card_layout.addWidget(b_card)
                 else:
-                    b_row = QWidget()
-                    b_layout = QHBoxLayout(b_row)
-                    b_layout.setContentsMargins(0, 4, 0, 4)
-                    b_layout.setAlignment(Qt.AlignVCenter)
+                    b_card = QFrame()
+                    b_card.setStyleSheet("""
+                        QFrame {
+                            background-color: #f0fdfa;
+                            border: 1px solid #99f6e4;
+                            border-radius: 6px;
+                        }
+                    """)
+                    b_layout = QVBoxLayout(b_card)
+                    b_layout.setContentsMargins(8, 8, 8, 8)
+                    b_layout.setSpacing(6)
+
+                    title_lbl = QLabel("⚡ Math Calculation Builder")
+                    title_lbl.setStyleSheet("font-weight: bold; color: #0d9488; font-size: 11px;")
+                    b_layout.addWidget(title_lbl)
+
+                    expr_row = QWidget()
+                    expr_layout = QHBoxLayout(expr_row)
+                    expr_layout.setContentsMargins(0, 0, 0, 0)
+                    expr_layout.setSpacing(4)
 
                     # Object 1: Operand A Button / Selection Box
-                    self.current_btn_op_a = QPushButton(builder.operand_a or "Field A (Click tree)...")
+                    self.current_btn_op_a = QPushButton(builder.operand_a or "Field A")
                     self.current_btn_op_a.clicked.connect(lambda _, c=c_idx: self.select_operand_target_ui(c, 'A'))
-                    b_layout.addWidget(self.current_btn_op_a, stretch=2)
+                    expr_layout.addWidget(self.current_btn_op_a, stretch=1)
 
-                    # Object 2: Beautified Operator Dropdown
+                    # Object 2: Beautified Compact Operator Dropdown
                     combo_op = QComboBox()
                     combo_op.addItems(["+", "-", "*", "/", "norm", "wrap_180", "wrap_360", "rad2deg", "deg2rad", "ang_sub"])
                     combo_op.setCurrentText(builder.operator)
                     combo_op.setStyleSheet(OPERATOR_COMBO_STYLE)
                     combo_op.currentTextChanged.connect(lambda text, c=c_idx: self.on_operator_combo_changed(c, text))
-                    b_layout.addWidget(combo_op)
+                    expr_layout.addWidget(combo_op)
 
                     # Object 3: Operand B FocusLineEdit
                     self.current_input_op_b = FocusLineEdit(builder.operand_b)
                     self.current_input_op_b.focused.connect(lambda c=c_idx: self.select_operand_target_ui(c, 'B'))
                     self.current_input_op_b.textChanged.connect(lambda text: setattr(builder, 'operand_b', text))
-                    b_layout.addWidget(self.current_input_op_b, stretch=2)
+                    expr_layout.addWidget(self.current_input_op_b, stretch=1)
+
+                    b_layout.addWidget(expr_row)
 
                     # Apply initial UI styling for builder row
                     self.update_builder_operand_ui(c_idx)
 
-                    # Object 4: OK Button
-                    btn_ok = QPushButton("OK")
-                    btn_ok.setStyleSheet("background: #0d9488; color: #ffffff; font-weight: bold; border: none; border-radius: 4px; padding: 3px 8px; font-size: 11px;")
-                    btn_ok.clicked.connect(lambda _, c=c_idx: self.execute_inline_calc(c))
-                    b_layout.addWidget(btn_ok)
+                    action_row = QWidget()
+                    action_layout = QHBoxLayout(action_row)
+                    action_layout.setContentsMargins(0, 0, 0, 0)
+                    action_layout.setSpacing(6)
 
                     # Object 5: Cancel Button
                     btn_cancel = QPushButton("Cancel")
-                    btn_cancel.setStyleSheet("background: #f5f5f5; color: #ef4444; border: 1px solid #cbd5e1; font-weight: bold; border-radius: 4px; padding: 3px 8px; font-size: 11px;")
+                    btn_cancel.setStyleSheet("background: #ffffff; color: #64748b; border: 1px solid #cbd5e1; font-weight: bold; border-radius: 4px; padding: 4px 8px; font-size: 11px;")
                     btn_cancel.clicked.connect(lambda _, c=c_idx: self.cancel_inline_builder(c))
-                    b_layout.addWidget(btn_cancel)
+                    action_layout.addWidget(btn_cancel)
 
-                    card_layout.addWidget(b_row)
+                    # Object 4: OK Button (Prominent Action)
+                    btn_ok = QPushButton("✓ Add Math Plot")
+                    btn_ok.setStyleSheet("background: #0d9488; color: #ffffff; font-weight: bold; border: none; border-radius: 4px; padding: 4px 12px; font-size: 11px;")
+                    btn_ok.clicked.connect(lambda _, c=c_idx: self.execute_inline_calc(c))
+                    action_layout.addWidget(btn_ok, stretch=1)
+
+                    b_layout.addWidget(action_row)
+                    card_layout.addWidget(b_card)
             else:
                 # Math Calculation Button at the bottom of each Chart card
                 btn_calc = QPushButton(f"🧮 Calculate Data for Chart #{c_idx + 1}")
