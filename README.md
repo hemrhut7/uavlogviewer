@@ -1,59 +1,38 @@
-# UAV Log Viewer
+# UAV Log Viewer (Python PySide6 Edition)
 
-![log seeking](preview.gif "Logo Title Text 1")
+![log seeking](preview.gif "UAV Log Viewer")
 
- This is a Javascript based log viewer for Mavlink telemetry and dataflash logs.
- [Live demo here](http://plot.ardupilot.org).
+UAV Log Viewer is a high-performance Python desktop application built with PySide6, Plotly, PyMAVLink, and NumPy for parsing and analyzing MAVLink telemetry (`.tlog`, `.mavlink`) and DataFlash logs (`.bin`, `.log`).
 
-## Build Setup
+## Features
 
-``` bash
-# initialize submodules
-git submodule update --init --recursive
+- **Multi-Format Parsing**: Fast parsing for DataFlash (`.bin`, `.log`), MAVLink (`.tlog`), and DJI flight logs.
+- **Interactive Multi-Chart GUI**: Drag-and-drop field selection, synchronized crosshair/time-seeking, and flight mode shading.
+- **Expression & Sensor Data Calculation**: Custom expressions and parameter viewing.
+- **Plotly & PySide6 Desktop Integration**: Rich HTML/SVG visualization powered by Qt WebEngine.
 
-# install dependencies
-npm install
+## Installation & Setup
 
-# enter Cesium token
-export VUE_APP_CESIUM_TOKEN=<your token>
+### Prerequisites
+- Python 3.9+
 
-# serve with hot reload at localhost:8080
-npm run dev
+### Setup
 
-# build for production with minification
-npm run build
+```bash
+# Create and activate virtual environment (optional)
+python3 -m venv .venv
+source .venv/bin/activate
 
-# run unit tests
-npm run unit
-
-# run e2e tests
-npm run e2e
-
-# run all tests
-npm test
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-# Docker
+## Running the Application
 
-run the prebuilt docker image:
+```bash
+# Run GUI application
+python -u main.py
 
-``` bash
-docker run -p 8080:8080 -d ghcr.io/ardupilot/uavlogviewer:latest
-
-```
-
-or build the docker file locally:
-
-``` bash
-
-# Build Docker Image
-docker build -t <your username>/uavlogviewer .
-
-# Run Docker Image
-docker run -e VUE_APP_CESIUM_TOKEN=<Your cesium ion token> -it -p 8080:8080 -v ${PWD}:/usr/src/app <your username>/uavlogviewer
-
-# Navigate to localhost:8080 in your web browser
-
-# changes should automatically be applied to the viewer
-
+# Open a specific log file directly
+python -u main.py path/to/log_file.tlog
 ```

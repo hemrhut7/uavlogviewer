@@ -1,85 +1,36 @@
-# UAV Log Viewer 使用說明書 (Multi-SysID & Multi-Chart 增強版)
+# UAV Log Viewer 使用說明書 (Python PySide6 桌面版)
 
-歡迎使用更新後的 UAV Log Viewer。本版本新增了多機同時顯示 (Multi-SysID Support) 與多獨立圖表 (Multi-Chart) 功能，並針對大型日誌載入穩定性進行了深度優化。
+歡迎使用 UAV Log Viewer (Python PySide6 桌面版)。本軟體採用 PySide6 (Qt for Python)、PyMAVLink、NumPy 與 Plotly 提供高效能的 UAV 日誌（MAVLink `.tlog`、DataFlash `.bin`/`.log` 及 DJI 日誌）解析與視覺化分析功能。
 
-## 0. 環境準備 (新電腦必看)
+## 1. 環境需求與啟動
 
-若您是在新的電腦上第一次執行此專案，請確保已安裝以下環境：
+### 1.1 需求環境
+* **Python 3.9+**
+* 依賴套件：`PySide6`, `plotly`, `pymavlink`, `numpy`, `pandas`, `matplotlib`
 
-### 1. 必備環境
-*   **Node.js (LTS 版本)**：專案核心，建議使用 Node v18 或更新版本。
-*   **Python 3**：用於啟動測試伺服器。
-*   **Git**：用於管理程式碼。
+### 1.2 安裝依賴與啟動
+在專案根目錄開啟終端機，執行以下指令：
 
-### 2. 初始化專案 (僅需執行一次)
-在第一次運行前，請打開終端機進入專案資料夾，執行以下指令安裝依賴套件：
 ```bash
-npm install
+# 安裝依賴
+pip install -r requirements.txt
+
+# 啟動應用程式
+python -u main.py
+
+# 載入特定日誌檔
+python -u main.py data/2026-04-17\ 14-14-16.tlog
 ```
 
 ---
 
-## 1. 啟動方式 (穩定模式)
+## 2. 核心功能簡介
 
-為了確保在處理大型日誌時不會因瀏覽器記憶體壓力而自動重整，建議使用**生產模式 (Production Mode)** 執行：
-
-1. **編譯最新程式碼** (若有修改過代碼才需重新執行)：
-   ```bash
-   source ~/.nvm/nvm.sh && nvm use default
-   npm run build
-   ```
-2. **啟動靜態伺服器**：
-   ```bash
-   python3 -m http.server 8081 --directory dist
-   ```
-3. **訪問地址**：在瀏覽器開啟 [http://localhost:8081](http://localhost:8081)
+1. **多格式日誌解析**：自動識別 MAVLink (`.tlog`, `.mavlink`)、DataFlash (`.bin`, `.log`) 與 DJI 飛行日誌。
+2. **互動式多圖表顯示 (Multi-Chart)**：支援多頻道獨立勾選、繪製、時間軸同步 (X-axis Sync) 與游標同步。
+3. **飛行模式與事件標記**：自動根據日誌中的 `MODE` 數據繪製高對比度飛行模式背景區間。
+4. **參數檢視 (Param Viewer)** 與 **數值計算 (Expression Editor / Data Calculator)**。
 
 ---
 
-## 2. 多機 (Multi-SysID) 支援功能
-
-當載入包含多個系統 ID (例如 SysID 1 飛控與 SysID 99 感測器) 的 TLOG 檔案時：
-
-### 2.1 資料自動分離
-系統會自動識別 MAVLink 訊息中的 `srcSystem`，並將非主機 (SysID 1) 的資料加上後綴。
-- **SysID 1 (主機)**：顯示為原始名稱，如 `ATTITUDE`。
-- **SysID 99 (感測器/二號機)**：自動標記為 `ATTITUDE[99]`。
-
-### 2.2 隔離顯示
-- **飛行模式與狀態**：畫面上方的狀態列與 3D 軌跡預設僅連動 SysID 1 的資料，避免不同設備間的狀態頻繁跳動。
-- **欄位選取**：在左側 **Plot Individual Field** 清單中，您可以分別展開 `[1]` 或 `[99]` 的頻道，獨立勾選感測器或飛控的特定數據。
-
----
-
-## 3. 多獨立圖表 (Multi-Chart) 繪製
-
-現在您可以同時開啟多張獨立的時間序列圖表，進行跨數據比對。
-
-### 3.1 新增圖表
-- 在左側選單點擊 **「+ Add New Chart」**。
-- 畫面中央會出現新的 **Chart #2**、**Chart #3** ... 等區域。
-
-### 3.2 資料分配
-- 展開 **Plot Individual Field** 搜尋您要的資料。
-- 在每個欄位右方，現在有 **「Add to Chart 1」**, **「Add to Chart 2」** 等按鈕（或是透過拖拽/搜尋），將特定數據指定到對應的圖表區。
-
-### 3.3 全域時間連動 (Global Sync)
-- **縮放同步**：在任何一張圖表上使用滑鼠滾輪縮放或拖拉 X 軸，**所有圖表**會同步跳轉至相同的時間範圍。
-- **游標同步**：當您的滑鼠在一張圖表上懸停時，其他圖表也會出現對應時間點的數值與垂直標籤線。
-
----
-
-## 4. 常見問題與除錯 (FAQ)
-
-### Q: 點擊 Plot 之後畫面突然重新載入 (Sudden Reload)？
-**A:** 這通常是因為正在使用開發模式 (`npm run dev`) 且處理超大型日誌。
-- **解決方案**：請切換回上述的 **生產模式 (Port 8081)**。我們已經實施了「分塊資料傳輸 (IPC Chunking)」，生產模式下幾乎不會再發生此問題。
-
-### Q: 為什麼看不到 SysID 99 的訊息？
-**A:** 請確認 TLOG 檔案內確實包含來自該 ID 的訊息。
-- 您可以開啟 **Message Viewer** (工具列圖示) 查看原始訊息流。
-- 只有當 Parser 偵測到該 ID 的訊息後，`Plot Individual Field` 清單才會動態更新出帶有後綴的欄位。
-
----
-
-*祝您分析愉快！如有任何需求，請隨時聯繫開發團隊。*
+*祝您分析愉快！*
