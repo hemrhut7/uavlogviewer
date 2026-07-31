@@ -18,6 +18,7 @@ from typing import Dict, List, Optional
 from uavlogviewer.parsers.base_parser import ParsedLog, format_data_rate
 from uavlogviewer.models.chart_store import ChartStore, CalcBuilderState, DEFAULT_AXIS_COLORS
 from uavlogviewer.tools.plotly_exporter import truncate_text
+from uavlogviewer.tools.log_summary import analyze_log_summary
 
 def find_sensor_vector_groups(parsed_log) -> dict:
     if not parsed_log or not parsed_log.time_series:
@@ -197,6 +198,95 @@ class SidebarWidget(QWidget):
         drop_layout.addWidget(self.btn_open_file)
 
         home_layout.addWidget(drop_box)
+
+        # Log Key Summary Card
+        self.summary_box = QGroupBox("📊 Log Analysis Summary (重點摘要)")
+        summary_layout = QVBoxLayout(self.summary_box)
+        summary_layout.setSpacing(8)
+
+        # 1. Flight Time Card
+        flight_card = QFrame()
+        flight_card.setStyleSheet("""
+            QFrame {
+                background: #f0fdfa;
+                border: 1px solid #ccfbf1;
+                border-radius: 6px;
+            }
+        """)
+        flight_card_layout = QVBoxLayout(flight_card)
+        flight_card_layout.setContentsMargins(8, 8, 8, 8)
+        flight_card_layout.setSpacing(4)
+
+        flight_title = QLabel("⏱️ 總飛行時間 (解鎖 ~ 上鎖)")
+        flight_title.setStyleSheet("font-weight: bold; color: #0f766e; font-size: 12px;")
+        flight_card_layout.addWidget(flight_title)
+
+        self.lbl_flight_time_val = QLabel("N/A (未載入 Log 檔案)")
+        self.lbl_flight_time_val.setStyleSheet("font-weight: bold; color: #0d9488; font-size: 13px;")
+        self.lbl_flight_time_val.setWordWrap(True)
+        flight_card_layout.addWidget(self.lbl_flight_time_val)
+
+        self.lbl_flight_time_detail = QLabel("最長單次解鎖時長")
+        self.lbl_flight_time_detail.setStyleSheet("color: #64748b; font-size: 11px;")
+        self.lbl_flight_time_detail.setWordWrap(True)
+        flight_card_layout.addWidget(self.lbl_flight_time_detail)
+
+        summary_layout.addWidget(flight_card)
+
+        # 2. Wind Speed Card
+        wind_card = QFrame()
+        wind_card.setStyleSheet("""
+            QFrame {
+                background: #fff7ed;
+                border: 1px solid #ffedd5;
+                border-radius: 6px;
+            }
+        """)
+        wind_card_layout = QVBoxLayout(wind_card)
+        wind_card_layout.setContentsMargins(8, 8, 8, 8)
+        wind_card_layout.setSpacing(4)
+
+        wind_title = QLabel("💨 飛行風速估測")
+        wind_title.setStyleSheet("font-weight: bold; color: #c2410c; font-size: 12px;")
+        wind_card_layout.addWidget(wind_title)
+
+        self.lbl_wind_avg_val = QLabel("平均風速: N/A")
+        self.lbl_wind_avg_val.setStyleSheet("font-weight: bold; color: #ea580c; font-size: 12px;")
+        self.lbl_wind_avg_val.setWordWrap(True)
+        wind_card_layout.addWidget(self.lbl_wind_avg_val)
+
+        self.lbl_wind_max_val = QLabel("最大風速: N/A")
+        self.lbl_wind_max_val.setStyleSheet("font-weight: bold; color: #ea580c; font-size: 12px;")
+        self.lbl_wind_max_val.setWordWrap(True)
+        wind_card_layout.addWidget(self.lbl_wind_max_val)
+
+        self.lbl_wind_source = QLabel("數據來源: 無")
+        self.lbl_wind_source.setStyleSheet("color: #64748b; font-size: 11px;")
+        self.lbl_wind_source.setWordWrap(True)
+        wind_card_layout.addWidget(self.lbl_wind_source)
+
+        summary_layout.addWidget(wind_card)
+
+        # 3. Log Info Card
+        info_card = QFrame()
+        info_card.setStyleSheet("""
+            QFrame {
+                background: #fafafa;
+                border: 1px solid #e5e5e5;
+                border-radius: 6px;
+            }
+        """)
+        info_card_layout = QVBoxLayout(info_card)
+        info_card_layout.setContentsMargins(8, 6, 8, 6)
+        info_card_layout.setSpacing(2)
+
+        self.lbl_log_type_info = QLabel("Log 類型: - | 總記錄時長: -")
+        self.lbl_log_type_info.setStyleSheet("color: #525252; font-size: 11px; font-weight: bold;")
+        info_card_layout.addWidget(self.lbl_log_type_info)
+
+        summary_layout.addWidget(info_card)
+
+        home_layout.addWidget(self.summary_box)
         home_layout.addStretch()
 
         self.nav_tabs.addTab(home_tab, "🏠 Home")
@@ -335,6 +425,7 @@ class SidebarWidget(QWidget):
         self.parsed_log = parsed_log
         self.lbl_filename.setText(f"📄 {parsed_log.filename}")
         self.lbl_filename.setStyleSheet("color: #0d9488; font-weight: bold;")
+        self.update_log_summary(parsed_log)
         self.nav_tabs.setCurrentIndex(1)
         self.tree.blockSignals(True)
         self.tree.clear()
@@ -353,6 +444,45 @@ class SidebarWidget(QWidget):
 
         self.tree.blockSignals(False)
         self.rebuild_setup_panel()
+
+    def update_log_summary(self, parsed_log: ParsedLog):
+        summary = analyze_log_summary(parsed_log)
+
+        # 1. Flight time update
+        if summary.has_arming_data and summary.longest_flight_span:
+            dur_str = summary.longest_flight_span.format_duration()
+            self.lbl_flight_time_val.setText(dur_str)
+            if summary.flight_count > 1:
+                self.lbl_flight_time_detail.setText(f"偵測到 {summary.flight_count} 次解鎖，此為最長一次解鎖時長 (總解鎖時長: {summary.total_armed_duration:.1f} s)")
+            else:
+                self.lbl_flight_time_detail.setText(f"解鎖時段: {summary.longest_flight_span.start_time:.1f}s ~ {summary.longest_flight_span.end_time:.1f}s (來源: {summary.arming_source})")
+        else:
+            if summary.total_log_duration > 0:
+                d = int(round(summary.total_log_duration))
+                mins = d // 60
+                secs = d % 60
+                self.lbl_flight_time_val.setText(f"{mins}m {secs}s ({summary.total_log_duration:.1f} s) [全 Log 時長]")
+                self.lbl_flight_time_detail.setText("未偵測到明確解鎖/上鎖事件，顯示全 Log 時長")
+            else:
+                self.lbl_flight_time_val.setText("N/A")
+                self.lbl_flight_time_detail.setText("無時間資料")
+
+        # 2. Wind speed update
+        if summary.has_wind_data and summary.avg_wind_speed_ms is not None and summary.max_wind_speed_ms is not None:
+            avg_ms = summary.avg_wind_speed_ms
+            max_ms = summary.max_wind_speed_ms
+            avg_kmh = avg_ms * 3.6
+            max_kmh = max_ms * 3.6
+            self.lbl_wind_avg_val.setText(f"平均風速: {avg_ms:.2f} m/s ({avg_kmh:.1f} km/h)")
+            self.lbl_wind_max_val.setText(f"最大風速: {max_ms:.2f} m/s ({max_kmh:.1f} km/h)")
+            self.lbl_wind_source.setText(f"數據來源: {summary.wind_source} (飛行時段數據)")
+        else:
+            self.lbl_wind_avg_val.setText("平均風速: N/A")
+            self.lbl_wind_max_val.setText("最大風速: N/A")
+            self.lbl_wind_source.setText("無風速估測數值 (Log 中未包含 WIND/EKF 風速資料)")
+
+        # 3. Log info update
+        self.lbl_log_type_info.setText(f"Log 類型: {summary.log_type.upper()} | 總記錄時長: {summary.total_log_duration:.1f} s")
 
     def filter_tree(self, text: str):
         query = text.strip().upper()
