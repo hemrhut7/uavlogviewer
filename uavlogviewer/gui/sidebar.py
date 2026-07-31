@@ -200,7 +200,7 @@ class SidebarWidget(QWidget):
         home_layout.addWidget(drop_box)
 
         # Log Key Summary Card
-        self.summary_box = QGroupBox("📊 Log Analysis Summary (重點摘要)")
+        self.summary_box = QGroupBox("Log Analysis Summary")
         summary_layout = QVBoxLayout(self.summary_box)
         summary_layout.setSpacing(8)
 
@@ -452,10 +452,6 @@ class SidebarWidget(QWidget):
         if summary.has_arming_data and summary.longest_flight_span:
             dur_str = summary.longest_flight_span.format_duration()
             self.lbl_flight_time_val.setText(dur_str)
-            if summary.flight_count > 1:
-                self.lbl_flight_time_detail.setText(f"偵測到 {summary.flight_count} 次解鎖，此為最長一次解鎖時長 (總解鎖時長: {summary.total_armed_duration:.1f} s)")
-            else:
-                self.lbl_flight_time_detail.setText(f"解鎖時段: {summary.longest_flight_span.start_time:.1f}s ~ {summary.longest_flight_span.end_time:.1f}s (來源: {summary.arming_source})")
         else:
             if summary.total_log_duration > 0:
                 d = int(round(summary.total_log_duration))
@@ -471,10 +467,8 @@ class SidebarWidget(QWidget):
         if summary.has_wind_data and summary.avg_wind_speed_ms is not None and summary.max_wind_speed_ms is not None:
             avg_ms = summary.avg_wind_speed_ms
             max_ms = summary.max_wind_speed_ms
-            avg_kmh = avg_ms * 3.6
-            max_kmh = max_ms * 3.6
-            self.lbl_wind_avg_val.setText(f"平均風速: {avg_ms:.2f} m/s ({avg_kmh:.1f} km/h)")
-            self.lbl_wind_max_val.setText(f"最大風速: {max_ms:.2f} m/s ({max_kmh:.1f} km/h)")
+            self.lbl_wind_avg_val.setText(f"平均風速: {avg_ms:.2f} m/s")
+            self.lbl_wind_max_val.setText(f"最大風速: {max_ms:.2f} m/s")
             self.lbl_wind_source.setText(f"數據來源: {summary.wind_source} (飛行時段數據)")
         else:
             self.lbl_wind_avg_val.setText("平均風速: N/A")

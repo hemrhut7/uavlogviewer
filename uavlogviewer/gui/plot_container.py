@@ -7,11 +7,11 @@ Dependencies: PySide6, numpy, chart_store, plotly_exporter, QtWebEngineWidgets.
 """
 import os
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
-                               QTableWidgetItem, QHeaderView, QGroupBox)
-from PySide6.QtCore import QUrl, Qt
+                               QTableWidgetItem, QHeaderView, QGroupBox, QFileDialog)
 from PySide6.QtCore import QUrl, Qt, Signal
 from PySide6.QtGui import QPalette, QColor
 from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWebEngineCore import QWebEngineDownloadRequest
 import numpy as np
 from typing import Optional, List
 from uavlogviewer.parsers.base_parser import ParsedLog
@@ -30,6 +30,7 @@ class PlotContainer(QWidget):
 
         # Plotly Embedded Viewport Widget (QWebEngineView)
         self.plotly_web_view = QWebEngineView()
+        self.plotly_web_view.page().profile().downloadRequested.connect(self.on_download_requested)
         self.plotly_web_view.titleChanged.connect(self.on_web_title_changed)
         self.layout.addWidget(self.plotly_web_view, stretch=4)
 
@@ -111,6 +112,21 @@ class PlotContainer(QWidget):
             self.plotly_web_view.load(QUrl.fromLocalFile(tmp_file))
         except Exception as e:
             print(f"Error updating Plotly viewport: {e}")
+
+    def on_download_requested(self, download_item: QWebEngineDownloadRequest):
+        suggested_name = download_item.suggestedFileName() or download_item.downloadFileName() or "newplot.png"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Plot Image",
+            suggested_name,
+            "PNG Image (*.png);;All Files (*)"
+        )
+        if file_path:
+            download_item.setDownloadDirectory(os.path.dirname(file_path))
+            download_item.setDownloadFileName(os.path.basename(file_path))
+            download_item.accept()
+        else:
+            download_item.cancel()
 
     def on_web_title_changed(self, title: str):
         if not title:
