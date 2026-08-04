@@ -32,12 +32,12 @@ def sanitize_array(arr: np.ndarray) -> np.ndarray:
         return np.array(clean)
     return arr
 
-def filter_by_segment(t_arr: np.ndarray, y_arr: np.ndarray, segment_filter: str) -> tuple:
-    """Slices t_arr and y_arr to match the chosen segment filter ('longest', 'all', or segment index)."""
-    if segment_filter == "all" or t_arr is None or len(t_arr) == 0:
+def filter_by_segment(t_arr: np.ndarray, y_arr: np.ndarray, parsed_log: ParsedLog, segment_filter: str) -> tuple:
+    """Slices t_arr and y_arr to match the chosen log-level segment filter ('longest', 'all', or segment index)."""
+    if segment_filter == "all" or t_arr is None or len(t_arr) == 0 or not parsed_log:
         return t_arr, y_arr
 
-    segs = detect_segments_from_timestamps(t_arr)
+    segs = parsed_log.get_segments()
     if not segs:
         return t_arr, y_arr
 
@@ -50,9 +50,8 @@ def filter_by_segment(t_arr: np.ndarray, y_arr: np.ndarray, segment_filter: str)
             target_seg = segs[idx]
 
     if target_seg:
-        s_idx = target_seg.start_idx
-        e_idx = target_seg.end_idx + 1
-        return t_arr[s_idx:e_idx], y_arr[s_idx:e_idx]
+        mask = (t_arr >= target_seg.start_time) & (t_arr <= target_seg.end_time)
+        return t_arr[mask], y_arr[mask]
 
     return t_arr, y_arr
 
@@ -161,12 +160,12 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                 if x_key in parsed_log.time_series:
                     x_y_arr = sanitize_array(parsed_log.time_series[x_key])
                     x_t_arr = parsed_log.timestamps.get(x_key, parsed_log.timestamps.get(x_key.split('.')[0], np.arange(len(x_y_arr))))
-                    x_t_arr, x_y_arr = filter_by_segment(x_t_arr, x_y_arr, chart_store.segment_filter)
+                    x_t_arr, x_y_arr = filter_by_segment(x_t_arr, x_y_arr, parsed_log, chart_store.segment_filter)
 
                 if y_key in parsed_log.time_series:
                     y_y_arr = sanitize_array(parsed_log.time_series[y_key])
                     y_t_arr = parsed_log.timestamps.get(y_key, parsed_log.timestamps.get(y_key.split('.')[0], np.arange(len(y_y_arr))))
-                    y_t_arr, y_y_arr = filter_by_segment(y_t_arr, y_y_arr, chart_store.segment_filter)
+                    y_t_arr, y_y_arr = filter_by_segment(y_t_arr, y_y_arr, parsed_log, chart_store.segment_filter)
 
                 if len(x_y_arr) > 0 and len(y_y_arr) > 0:
                     # 1. Filter top XY Scatter plot by visible_range if specified
@@ -297,7 +296,7 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                 if len(t_arr) != len(y_arr):
                     t_arr = np.arange(len(y_arr))
 
-                t_arr, y_arr = filter_by_segment(t_arr, y_arr, chart_store.segment_filter)
+                t_arr, y_arr = filter_by_segment(t_arr, y_arr, parsed_log, chart_store.segment_filter)
 
                 use_secondary = (expr.axis == 1)
                 if use_secondary:

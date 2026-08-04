@@ -167,7 +167,12 @@ class ParsedLog:
             t_arr = self.timestamps[target_type.split('.')[0]]
         else:
             primary_key = None
-            for candidate in ("IMU[0]", "IMU", "ATT[0]", "ATT", "POS[0]", "POS"):
+            candidates = (
+                "IMU[0]", "IMU", "ATT[0]", "ATT", "POS[0]", "POS", "BARO[0]", "BARO",
+                "ATTITUDE", "RAW_IMU", "HIGHRES_IMU", "GLOBAL_POSITION_INT", "VFR_HUD",
+                "SERVO_OUTPUT_RAW", "GPS_RAW_INT", "SCALED_IMU", "SYS_STATUS"
+            )
+            for candidate in candidates:
                 if candidate in self.timestamps and len(self.timestamps[candidate]) > 0:
                     primary_key = candidate
                     break
@@ -184,7 +189,8 @@ class ParsedLog:
 def detect_segments_from_timestamps(
     timestamps: np.ndarray,
     gap_multiplier: float = 20.0,
-    min_gap_s: float = 0.05
+    min_gap_s: float = 15.0,
+    min_seg_samples: int = 5
 ) -> List[SegmentInfo]:
     """Detects continuous time-series segments separated by gaps in a 1D timestamps array (in seconds)."""
     if timestamps is None or len(timestamps) == 0:
@@ -214,35 +220,28 @@ def detect_segments_from_timestamps(
     median_dt = float(np.median(positive))
     gap_threshold = max(median_dt * gap_multiplier, min_gap_s)
 
-    gap_indices = np.flatnonzero(diffs > gap_threshold)
-    starts = np.r_[0, gap_indices + 1]
-    ends = np.r_[gap_indices, len(t_arr) - 1]
+    raw_gap_indices = np.flatnonzero(diffs > gap_threshold)
+    filtered_gap_indices = [g_idx for g_idx in raw_gap_indices if diffs[g_idx] >= min_gap_s]
 
-    segments: List[SegmentInfo] = []
-    longest_idx = 0
-    max_duration = -1.0
-    max_samples = -1
+    gap_indices = np.array(filtered_gap_indices, dtype=np.int64)
+    starts = np.r_[0, gap_indices + 1] if len(gap_indices) > 0 else np.array([0])
+    ends = np.r_[gap_indices, len(t_arr) - 1] if len(gap_indices) > 0 else np.array([len(t_arr) - 1])
 
-    for seg_idx, (s, e) in enumerate(zip(starts, ends)):
+    raw_segments: List[SegmentInfo] = []
+    for (s, e) in zip(starts, ends):
         s_int, e_int = int(s), int(e)
         seg_time = t_arr[s_int : e_int + 1]
         n = len(seg_time)
         t0, t1 = float(seg_time[0]), float(seg_time[-1])
         dur_s = max(0.0, t1 - t0)
 
-        # Sampling rate calculation: (N - 1) / duration
         if dur_s > 0 and n > 1:
             fs = (n - 1) / dur_s
         else:
             fs = 0.0
 
-        if dur_s > max_duration or (dur_s == max_duration and n > max_samples):
-            max_duration = dur_s
-            max_samples = n
-            longest_idx = seg_idx
-
-        segments.append(SegmentInfo(
-            index=seg_idx,
+        raw_segments.append(SegmentInfo(
+            index=0,
             start_idx=s_int,
             end_idx=e_int,
             start_time=t0,
@@ -253,20 +252,48 @@ def detect_segments_from_timestamps(
             is_longest=False
         ))
 
-    if segments:
-        segments[longest_idx] = SegmentInfo(
-            index=segments[longest_idx].index,
-            start_idx=segments[longest_idx].start_idx,
-            end_idx=segments[longest_idx].end_idx,
-            start_time=segments[longest_idx].start_time,
-            end_time=segments[longest_idx].end_time,
-            duration=segments[longest_idx].duration,
-            samples=segments[longest_idx].samples,
-            fs=segments[longest_idx].fs,
+    # Filter out micro noise segments if larger segments exist
+    valid_segments = [s for s in raw_segments if s.samples >= min_seg_samples or s.duration >= 1.0]
+    if not valid_segments:
+        valid_segments = raw_segments
+
+    longest_idx = 0
+    max_duration = -1.0
+    max_samples = -1
+    final_segments: List[SegmentInfo] = []
+
+    for seg_idx, seg in enumerate(valid_segments):
+        if seg.duration > max_duration or (seg.duration == max_duration and seg.samples > max_samples):
+            max_duration = seg.duration
+            max_samples = seg.samples
+            longest_idx = seg_idx
+
+        final_segments.append(SegmentInfo(
+            index=seg_idx,
+            start_idx=seg.start_idx,
+            end_idx=seg.end_idx,
+            start_time=seg.start_time,
+            end_time=seg.end_time,
+            duration=seg.duration,
+            samples=seg.samples,
+            fs=seg.fs,
+            is_longest=False
+        ))
+
+    if final_segments:
+        final_segments[longest_idx] = SegmentInfo(
+            index=final_segments[longest_idx].index,
+            start_idx=final_segments[longest_idx].start_idx,
+            end_idx=final_segments[longest_idx].end_idx,
+            start_time=final_segments[longest_idx].start_time,
+            end_time=final_segments[longest_idx].end_time,
+            duration=final_segments[longest_idx].duration,
+            samples=final_segments[longest_idx].samples,
+            fs=final_segments[longest_idx].fs,
             is_longest=True
         )
 
-    return segments
+    return final_segments
 
 
 def calculate_data_rate(timestamps: np.ndarray) -> float:

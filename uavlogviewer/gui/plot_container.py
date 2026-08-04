@@ -193,7 +193,7 @@ class PlotContainer(QWidget):
                 if len(t_arr) != len(y_arr):
                     t_arr = np.arange(len(y_arr))
 
-                t_arr, y_arr = filter_by_segment(t_arr, y_arr, self.chart_store.segment_filter)
+                t_arr, y_arr = filter_by_segment(t_arr, y_arr, self.parsed_log, self.chart_store.segment_filter)
 
                 if x0 is not None and x1 is not None and len(t_arr) > 0:
                     mask = (t_arr >= x0) & (t_arr <= x1)
