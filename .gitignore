@@ -33,7 +33,6 @@ htmlcov/
 
 # Codex / agent scratchpad
 .codex
-.agents/
 .agent_scratchpad/
 .tmp_*.txt
 
