@@ -311,7 +311,7 @@ class SidebarWidget(QWidget):
         seg_layout.setContentsMargins(6, 4, 6, 4)
         seg_layout.setSpacing(6)
 
-        lbl_seg = QLabel("📍 Segment:")
+        lbl_seg = QLabel("Segment:")
         lbl_seg.setStyleSheet("font-weight: bold; color: #0f766e; font-size: 11px;")
         seg_layout.addWidget(lbl_seg)
 
@@ -336,8 +336,8 @@ class SidebarWidget(QWidget):
                 border: 1px solid #0d9488;
             }
         """)
-        self.cmb_segment.addItem("🏆 最長 Segment (預設自動)", "longest")
-        self.cmb_segment.addItem("🌐 所有 Segments (顯示全部)", "all")
+        self.cmb_segment.addItem("Longest Segment", "longest")
+        self.cmb_segment.addItem("All Segment", "all")
         self.cmb_segment.currentIndexChanged.connect(self.on_segment_combo_changed)
         seg_layout.addWidget(self.cmb_segment, stretch=1)
 
@@ -492,8 +492,8 @@ class SidebarWidget(QWidget):
         # Update Segment ComboBox
         self.cmb_segment.blockSignals(True)
         self.cmb_segment.clear()
-        self.cmb_segment.addItem("🏆 最長 Segment (預設自動)", "longest")
-        self.cmb_segment.addItem("🌐 所有 Segments (顯示全部)", "all")
+        self.cmb_segment.addItem("Longest Segment", "longest")
+        self.cmb_segment.addItem("All Segment", "all")
 
         segments = parsed_log.get_segments()
         if segments:
