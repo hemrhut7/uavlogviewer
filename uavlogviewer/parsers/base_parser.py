@@ -127,6 +127,18 @@ class LogEvent:
     event_type: str = "INFO"
 
 @dataclass
+class SegmentInfo:
+    index: int          # 0-indexed segment number
+    start_idx: int      # First index (inclusive)
+    end_idx: int        # Last index (inclusive)
+    start_time: float   # Timestamp of first sample (in seconds)
+    end_time: float     # Timestamp of last sample (in seconds)
+    duration: float     # Duration in seconds
+    samples: int        # Number of samples
+    fs: float           # Estimated sampling rate (Hz)
+    is_longest: bool = False
+
+@dataclass
 class ParsedLog:
     filename: str = ""
     log_type: str = ""
@@ -142,6 +154,120 @@ class ParsedLog:
     def get_data_rate(self, msg_type: str) -> float:
         t_arr = self.timestamps.get(msg_type)
         return calculate_data_rate(t_arr)
+
+    def get_segments(self, msg_type_or_field: str = "") -> List[SegmentInfo]:
+        """Gets continuous segments for a given msg_type or field, or primary telemetry timestamps."""
+        if not self.timestamps:
+            return []
+        
+        target_type = msg_type_or_field
+        if target_type and target_type in self.timestamps:
+            t_arr = self.timestamps[target_type]
+        elif target_type and '.' in target_type and target_type.split('.')[0] in self.timestamps:
+            t_arr = self.timestamps[target_type.split('.')[0]]
+        else:
+            primary_key = None
+            for candidate in ("IMU[0]", "IMU", "ATT[0]", "ATT", "POS[0]", "POS"):
+                if candidate in self.timestamps and len(self.timestamps[candidate]) > 0:
+                    primary_key = candidate
+                    break
+            if not primary_key:
+                best_len = -1
+                for k, v in self.timestamps.items():
+                    if len(v) > best_len:
+                        best_len = len(v)
+                        primary_key = k
+            t_arr = self.timestamps.get(primary_key, np.array([]))
+            
+        return detect_segments_from_timestamps(t_arr)
+
+def detect_segments_from_timestamps(
+    timestamps: np.ndarray,
+    gap_multiplier: float = 20.0,
+    min_gap_s: float = 0.05
+) -> List[SegmentInfo]:
+    """Detects continuous time-series segments separated by gaps in a 1D timestamps array (in seconds)."""
+    if timestamps is None or len(timestamps) == 0:
+        return []
+
+    t_arr = np.array(timestamps, dtype=np.float64)
+
+    if len(t_arr) < 2:
+        t0 = float(t_arr[0]) if len(t_arr) == 1 else 0.0
+        return [SegmentInfo(
+            index=0, start_idx=0, end_idx=len(t_arr) - 1 if len(t_arr) > 0 else 0,
+            start_time=t0, end_time=t0, duration=0.0, samples=len(t_arr),
+            fs=0.0, is_longest=True
+        )]
+
+    diffs = np.diff(t_arr)
+    positive = diffs[diffs > 0]
+
+    if len(positive) == 0:
+        t0, t1 = float(t_arr[0]), float(t_arr[-1])
+        return [SegmentInfo(
+            index=0, start_idx=0, end_idx=len(t_arr) - 1,
+            start_time=t0, end_time=t1, duration=max(0.0, t1 - t0),
+            samples=len(t_arr), fs=0.0, is_longest=True
+        )]
+
+    median_dt = float(np.median(positive))
+    gap_threshold = max(median_dt * gap_multiplier, min_gap_s)
+
+    gap_indices = np.flatnonzero(diffs > gap_threshold)
+    starts = np.r_[0, gap_indices + 1]
+    ends = np.r_[gap_indices, len(t_arr) - 1]
+
+    segments: List[SegmentInfo] = []
+    longest_idx = 0
+    max_duration = -1.0
+    max_samples = -1
+
+    for seg_idx, (s, e) in enumerate(zip(starts, ends)):
+        s_int, e_int = int(s), int(e)
+        seg_time = t_arr[s_int : e_int + 1]
+        n = len(seg_time)
+        t0, t1 = float(seg_time[0]), float(seg_time[-1])
+        dur_s = max(0.0, t1 - t0)
+
+        # Sampling rate calculation: (N - 1) / duration
+        if dur_s > 0 and n > 1:
+            fs = (n - 1) / dur_s
+        else:
+            fs = 0.0
+
+        if dur_s > max_duration or (dur_s == max_duration and n > max_samples):
+            max_duration = dur_s
+            max_samples = n
+            longest_idx = seg_idx
+
+        segments.append(SegmentInfo(
+            index=seg_idx,
+            start_idx=s_int,
+            end_idx=e_int,
+            start_time=t0,
+            end_time=t1,
+            duration=dur_s,
+            samples=n,
+            fs=fs,
+            is_longest=False
+        ))
+
+    if segments:
+        segments[longest_idx] = SegmentInfo(
+            index=segments[longest_idx].index,
+            start_idx=segments[longest_idx].start_idx,
+            end_idx=segments[longest_idx].end_idx,
+            start_time=segments[longest_idx].start_time,
+            end_time=segments[longest_idx].end_time,
+            duration=segments[longest_idx].duration,
+            samples=segments[longest_idx].samples,
+            fs=segments[longest_idx].fs,
+            is_longest=True
+        )
+
+    return segments
+
 
 def calculate_data_rate(timestamps: np.ndarray) -> float:
     """Calculates effective data rate (Hz) for a series of timestamps, robust to long time gaps."""

@@ -9,7 +9,7 @@ import json
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from uavlogviewer.parsers.base_parser import ParsedLog
+from uavlogviewer.parsers.base_parser import ParsedLog, detect_segments_from_timestamps
 from uavlogviewer.models.chart_store import ChartStore
 
 def truncate_text(text: str, max_len: int = 24) -> str:
@@ -32,6 +32,30 @@ def sanitize_array(arr: np.ndarray) -> np.ndarray:
         return np.array(clean)
     return arr
 
+def filter_by_segment(t_arr: np.ndarray, y_arr: np.ndarray, segment_filter: str) -> tuple:
+    """Slices t_arr and y_arr to match the chosen segment filter ('longest', 'all', or segment index)."""
+    if segment_filter == "all" or t_arr is None or len(t_arr) == 0:
+        return t_arr, y_arr
+
+    segs = detect_segments_from_timestamps(t_arr)
+    if not segs:
+        return t_arr, y_arr
+
+    target_seg = None
+    if segment_filter == "longest":
+        target_seg = next((s for s in segs if s.is_longest), segs[0])
+    elif str(segment_filter).isdigit():
+        idx = int(segment_filter)
+        if 0 <= idx < len(segs):
+            target_seg = segs[idx]
+
+    if target_seg:
+        s_idx = target_seg.start_idx
+        e_idx = target_seg.end_idx + 1
+        return t_arr[s_idx:e_idx], y_arr[s_idx:e_idx]
+
+    return t_arr, y_arr
+
 def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible_range: tuple = None) -> str:
     if not parsed_log or not chart_store or not chart_store.has_any_expressions():
         return """
@@ -53,6 +77,20 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
 
     if not active_charts:
         return "<html><body style='background-color:#fafafa;'></body></html>"
+
+    active_seg_bounds = None
+    if chart_store.segment_filter != "all":
+        primary_segs = parsed_log.get_segments()
+        if primary_segs:
+            target_seg = None
+            if chart_store.segment_filter == "longest":
+                target_seg = next((s for s in primary_segs if s.is_longest), primary_segs[0])
+            elif str(chart_store.segment_filter).isdigit():
+                idx = int(chart_store.segment_filter)
+                if 0 <= idx < len(primary_segs):
+                    target_seg = primary_segs[idx]
+            if target_seg:
+                active_seg_bounds = (target_seg.start_time, target_seg.end_time)
 
     # Compute row heights, specs, titles, and row mappings
     specs = []
@@ -123,10 +161,12 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                 if x_key in parsed_log.time_series:
                     x_y_arr = sanitize_array(parsed_log.time_series[x_key])
                     x_t_arr = parsed_log.timestamps.get(x_key, parsed_log.timestamps.get(x_key.split('.')[0], np.arange(len(x_y_arr))))
+                    x_t_arr, x_y_arr = filter_by_segment(x_t_arr, x_y_arr, chart_store.segment_filter)
 
                 if y_key in parsed_log.time_series:
                     y_y_arr = sanitize_array(parsed_log.time_series[y_key])
                     y_t_arr = parsed_log.timestamps.get(y_key, parsed_log.timestamps.get(y_key.split('.')[0], np.arange(len(y_y_arr))))
+                    y_t_arr, y_y_arr = filter_by_segment(y_t_arr, y_y_arr, chart_store.segment_filter)
 
                 if len(x_y_arr) > 0 and len(y_y_arr) > 0:
                     # 1. Filter top XY Scatter plot by visible_range if specified
@@ -225,6 +265,8 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
             # Persist timeline range if visible_range is active so it doesn't snap back to full range!
             if visible_range and len(visible_range) == 2 and visible_range[0] is not None and visible_range[1] is not None:
                 fig.update_xaxes(range=[visible_range[0], visible_range[1]], title_text="Time (seconds)", showticklabels=True, row=r_timeline, col=1)
+            elif active_seg_bounds:
+                fig.update_xaxes(range=[active_seg_bounds[0], active_seg_bounds[1]], title_text="Time (seconds)", showticklabels=True, row=r_timeline, col=1)
             else:
                 fig.update_xaxes(title_text="Time (seconds)", showticklabels=True, row=r_timeline, col=1)
 
@@ -254,6 +296,8 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
 
                 if len(t_arr) != len(y_arr):
                     t_arr = np.arange(len(y_arr))
+
+                t_arr, y_arr = filter_by_segment(t_arr, y_arr, chart_store.segment_filter)
 
                 use_secondary = (expr.axis == 1)
                 if use_secondary:
@@ -286,6 +330,8 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
 
             if visible_range and len(visible_range) == 2 and visible_range[0] is not None and visible_range[1] is not None:
                 fig.update_xaxes(range=[visible_range[0], visible_range[1]], showticklabels=(not chart_store.sync_zoom or r_ts == total_rows), row=r_ts, col=1)
+            elif active_seg_bounds:
+                fig.update_xaxes(range=[active_seg_bounds[0], active_seg_bounds[1]], showticklabels=(not chart_store.sync_zoom or r_ts == total_rows), title_text="Time (seconds)", row=r_ts, col=1)
             elif chart_store.sync_zoom and r_ts < total_rows:
                 fig.update_xaxes(showticklabels=False, row=r_ts, col=1)
             else:
@@ -297,9 +343,19 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
             if parsed_log.flight_modes:
                 spans_to_draw = parsed_log.flight_modes[:100]
                 for span in spans_to_draw:
+                    if active_seg_bounds:
+                        s_min, s_max = active_seg_bounds
+                        if span.end_time < s_min or span.start_time > s_max:
+                            continue
+                        v0 = max(span.start_time, s_min)
+                        v1 = min(span.end_time, s_max)
+                    else:
+                        v0 = span.start_time
+                        v1 = span.end_time
+
                     fig.add_vrect(
-                        x0=span.start_time,
-                        x1=span.end_time,
+                        x0=v0,
+                        x1=v1,
                         fillcolor=span.color,
                         opacity=0.20,
                         layer="below",

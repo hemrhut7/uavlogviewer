@@ -298,7 +298,52 @@ class SidebarWidget(QWidget):
         plot_layout = QVBoxLayout(plot_tab)
         plot_layout.setContentsMargins(2, 2, 2, 2)
 
-        # Plots Setup Scroll Area
+        # 1. Segment Control Box at the very top of Plot Tab
+        seg_box = QFrame()
+        seg_box.setStyleSheet("""
+            QFrame {
+                background-color: #f0fdfa;
+                border: 1px solid #ccfbf1;
+                border-radius: 6px;
+            }
+        """)
+        seg_layout = QHBoxLayout(seg_box)
+        seg_layout.setContentsMargins(6, 4, 6, 4)
+        seg_layout.setSpacing(6)
+
+        lbl_seg = QLabel("📍 Segment:")
+        lbl_seg.setStyleSheet("font-weight: bold; color: #0f766e; font-size: 11px;")
+        seg_layout.addWidget(lbl_seg)
+
+        self.cmb_segment = QComboBox()
+        self.cmb_segment.setStyleSheet("""
+            QComboBox {
+                background-color: #ffffff;
+                color: #0f766e;
+                font-weight: bold;
+                font-size: 11px;
+                border: 1px solid #0d9488;
+                border-radius: 4px;
+                padding: 3px 6px;
+            }
+            QComboBox:hover { background-color: #f0fdfa; border-color: #0f766e; }
+            QComboBox QAbstractItemView {
+                background-color: #ffffff;
+                color: #0f766e;
+                font-weight: bold;
+                selection-background-color: #f0fdfa;
+                selection-color: #0f766e;
+                border: 1px solid #0d9488;
+            }
+        """)
+        self.cmb_segment.addItem("🏆 最長 Segment (預設自動)", "longest")
+        self.cmb_segment.addItem("🌐 所有 Segments (顯示全部)", "all")
+        self.cmb_segment.currentIndexChanged.connect(self.on_segment_combo_changed)
+        seg_layout.addWidget(self.cmb_segment, stretch=1)
+
+        plot_layout.addWidget(seg_box)
+
+        # 2. Plots Setup Scroll Area
         setup_box = QGroupBox("Plots Setup")
         setup_box_layout = QVBoxLayout(setup_box)
 
@@ -443,7 +488,41 @@ class SidebarWidget(QWidget):
                 child_item.setData(0, Qt.UserRole, f"{msg_type}.{f}" if msg_type != "CALC" else f)
 
         self.tree.blockSignals(False)
+
+        # Update Segment ComboBox
+        self.cmb_segment.blockSignals(True)
+        self.cmb_segment.clear()
+        self.cmb_segment.addItem("🏆 最長 Segment (預設自動)", "longest")
+        self.cmb_segment.addItem("🌐 所有 Segments (顯示全部)", "all")
+
+        segments = parsed_log.get_segments()
+        if segments:
+            for seg in segments:
+                tag = " ⭐️最長" if seg.is_longest else ""
+                start_s = f"{seg.start_time:.1f}".rstrip('0').rstrip('.') if '.' in f"{seg.start_time:.1f}" else f"{int(seg.start_time)}"
+                end_s = f"{seg.end_time:.1f}".rstrip('0').rstrip('.') if '.' in f"{seg.end_time:.1f}" else f"{int(seg.end_time)}"
+                dur_s = f"{seg.duration:.1f}".rstrip('0').rstrip('.') if '.' in f"{seg.duration:.1f}" else f"{int(seg.duration)}"
+                text = f"Segment {seg.index + 1} ({start_s}s ~ {end_s}s, dt={dur_s}s){tag}"
+                self.cmb_segment.addItem(text, str(seg.index))
+
+        curr_filter = self.chart_store.segment_filter
+        found = False
+        for i in range(self.cmb_segment.count()):
+            if self.cmb_segment.itemData(i) == curr_filter:
+                self.cmb_segment.setCurrentIndex(i)
+                found = True
+                break
+        if not found:
+            self.cmb_segment.setCurrentIndex(0)
+            self.chart_store.segment_filter = "longest"
+
+        self.cmb_segment.blockSignals(False)
         self.rebuild_setup_panel()
+
+    def on_segment_combo_changed(self, idx: int):
+        data = self.cmb_segment.currentData()
+        if data:
+            self.chart_store.set_segment_filter(str(data))
 
     def update_log_summary(self, parsed_log: ParsedLog):
         summary = analyze_log_summary(parsed_log)

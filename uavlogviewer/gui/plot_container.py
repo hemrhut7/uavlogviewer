@@ -16,7 +16,7 @@ import numpy as np
 from typing import Optional, List
 from uavlogviewer.parsers.base_parser import ParsedLog
 from uavlogviewer.models.chart_store import ChartStore
-from uavlogviewer.tools.plotly_exporter import generate_plotly_html
+from uavlogviewer.tools.plotly_exporter import generate_plotly_html, filter_by_segment
 
 class PlotContainer(QWidget):
     point_alt_clicked = Signal(float)
@@ -192,6 +192,8 @@ class PlotContainer(QWidget):
 
                 if len(t_arr) != len(y_arr):
                     t_arr = np.arange(len(y_arr))
+
+                t_arr, y_arr = filter_by_segment(t_arr, y_arr, self.chart_store.segment_filter)
 
                 if x0 is not None and x1 is not None and len(t_arr) > 0:
                     mask = (t_arr >= x0) & (t_arr <= x1)
