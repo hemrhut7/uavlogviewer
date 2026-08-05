@@ -9,16 +9,17 @@ Dependencies: PySide6, numpy, chart_store.
 import numpy as np
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QLineEdit, QTreeWidget, QTreeWidgetItem, QLabel,
-                               QFileDialog, QGroupBox, QColorDialog, QComboBox,
+                               QFileDialog, QGroupBox, QColorDialog, QComboBox, QListView,
                                QTabWidget, QCheckBox, QScrollArea, QFrame, QRadioButton, QMessageBox,
                                QMenu, QInputDialog)
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPalette
 from typing import Dict, List, Optional
 from uavlogviewer.parsers.base_parser import ParsedLog, format_data_rate
 from uavlogviewer.models.chart_store import ChartStore, CalcBuilderState, DEFAULT_AXIS_COLORS
 from uavlogviewer.tools.plotly_exporter import truncate_text
 from uavlogviewer.tools.log_summary import analyze_log_summary
+from uavlogviewer.gui.clean_combobox import CleanComboBox
 
 def find_sensor_vector_groups(parsed_log) -> dict:
     if not parsed_log or not parsed_log.time_series:
@@ -58,66 +59,7 @@ def find_sensor_vector_groups(parsed_log) -> dict:
 
     return groups
 
-COMBO_BEAUTY_STYLE = """
-QComboBox {
-    background-color: #ffffff;
-    color: #0d9488;
-    font-weight: bold;
-    font-size: 11px;
-    border: 1px solid #0d9488;
-    border-radius: 4px;
-    padding: 2px 6px;
-    min-width: 34px;
-}
-QComboBox:hover {
-    background-color: #f0fdfa;
-    border-color: #0f766e;
-}
-QComboBox::drop-down {
-    border: none;
-    width: 12px;
-}
-QComboBox QAbstractItemView {
-    background-color: #ffffff;
-    color: #0d9488;
-    font-weight: bold;
-    selection-background-color: #f0fdfa;
-    selection-color: #0f766e;
-    border: 1px solid #0d9488;
-    border-radius: 4px;
-}
-"""
 
-OPERATOR_COMBO_STYLE = """
-QComboBox {
-    background-color: #ffffff;
-    color: #0d9488;
-    font-weight: bold;
-    font-size: 11px;
-    border: 1px solid #0d9488;
-    border-radius: 4px;
-    padding: 2px 4px;
-    min-width: 48px;
-    max-width: 65px;
-}
-QComboBox:hover {
-    background-color: #f0fdfa;
-    border-color: #0f766e;
-}
-QComboBox::drop-down {
-    border: none;
-    width: 12px;
-}
-QComboBox QAbstractItemView {
-    background-color: #ffffff;
-    color: #0d9488;
-    font-weight: bold;
-    selection-background-color: #f0fdfa;
-    selection-color: #0f766e;
-    border: 1px solid #0d9488;
-    border-radius: 4px;
-}
-"""
 
 class ClickableFrame(QFrame):
     clicked = Signal()
@@ -303,41 +245,17 @@ class SidebarWidget(QWidget):
         seg_box.setStyleSheet("""
             QFrame {
                 background-color: #f0fdfa;
-                border: 1px solid #ccfbf1;
-                border-radius: 6px;
+                border: 1px solid #99f6e4;
+                border-radius: 8px;
             }
         """)
         seg_layout = QHBoxLayout(seg_box)
-        seg_layout.setContentsMargins(6, 4, 6, 4)
-        seg_layout.setSpacing(6)
+        seg_layout.setContentsMargins(6, 6, 6, 6)
+        seg_layout.setSpacing(0)
 
-        lbl_seg = QLabel("Segment:")
-        lbl_seg.setStyleSheet("font-weight: bold; color: #0f766e; font-size: 11px;")
-        seg_layout.addWidget(lbl_seg)
-
-        self.cmb_segment = QComboBox()
-        self.cmb_segment.setStyleSheet("""
-            QComboBox {
-                background-color: #ffffff;
-                color: #0f766e;
-                font-weight: bold;
-                font-size: 11px;
-                border: 1px solid #0d9488;
-                border-radius: 4px;
-                padding: 3px 6px;
-            }
-            QComboBox:hover { background-color: #f0fdfa; border-color: #0f766e; }
-            QComboBox QAbstractItemView {
-                background-color: #ffffff;
-                color: #0f766e;
-                font-weight: bold;
-                selection-background-color: #f0fdfa;
-                selection-color: #0f766e;
-                border: 1px solid #0d9488;
-            }
-        """)
-        self.cmb_segment.addItem("Longest Segment", "longest")
-        self.cmb_segment.addItem("All Segment", "all")
+        self.cmb_segment = CleanComboBox()
+        self.cmb_segment.addItem("⚡ Longest Segment", "longest")
+        self.cmb_segment.addItem("🌐 All Segments", "all")
         self.cmb_segment.currentIndexChanged.connect(self.on_segment_combo_changed)
         seg_layout.addWidget(self.cmb_segment, stretch=1)
 
@@ -492,17 +410,17 @@ class SidebarWidget(QWidget):
         # Update Segment ComboBox
         self.cmb_segment.blockSignals(True)
         self.cmb_segment.clear()
-        self.cmb_segment.addItem("Longest Segment", "longest")
-        self.cmb_segment.addItem("All Segment", "all")
+        self.cmb_segment.addItem("⚡ Longest Segment", "longest")
+        self.cmb_segment.addItem("🌐 All Segments", "all")
 
         segments = parsed_log.get_segments()
         if segments:
             for seg in segments:
-                tag = " ⭐️最長" if seg.is_longest else ""
+                tag = " ⭐️ 最長" if seg.is_longest else ""
                 start_s = f"{seg.start_time:.1f}".rstrip('0').rstrip('.') if '.' in f"{seg.start_time:.1f}" else f"{int(seg.start_time)}"
                 end_s = f"{seg.end_time:.1f}".rstrip('0').rstrip('.') if '.' in f"{seg.end_time:.1f}" else f"{int(seg.end_time)}"
                 dur_s = f"{seg.duration:.1f}".rstrip('0').rstrip('.') if '.' in f"{seg.duration:.1f}" else f"{int(seg.duration)}"
-                text = f"Segment {seg.index + 1} ({start_s}s ~ {end_s}s, dt={dur_s}s){tag}"
+                text = f"📌 Segment {seg.index + 1} ({start_s}s ~ {end_s}s, dt={dur_s}s){tag}"
                 self.cmb_segment.addItem(text, str(seg.index))
 
         curr_filter = self.chart_store.segment_filter
@@ -1117,11 +1035,10 @@ class SidebarWidget(QWidget):
                     r_layout.addWidget(name_lbl, stretch=2)
 
                     # Beautified Axis Dropdown (L / R)
-                    axis_combo = QComboBox()
+                    axis_combo = CleanComboBox(font_size="10px", min_width="28px", max_width="38px", padding="1px 12px 1px 4px")
                     axis_combo.addItems(["L", "R"])
                     axis_combo.setCurrentIndex(min(max(0, expr.axis), 1))
                     axis_combo.setToolTip("L: Left Y-Axis | R: Right Y-Axis")
-                    axis_combo.setStyleSheet(COMBO_BEAUTY_STYLE)
                     axis_combo.currentIndexChanged.connect(
                         lambda idx, c=c_idx, n=expr.name: self.chart_store.set_expression_axis(c, n, idx)
                     )
@@ -1222,10 +1139,9 @@ class SidebarWidget(QWidget):
                     ctrl_layout.setContentsMargins(0, 2, 0, 2)
                     ctrl_layout.setSpacing(6)
 
-                    combo_op = QComboBox()
+                    combo_op = CleanComboBox(font_size="10px", min_width="48px", max_width="65px", padding="1px 14px 1px 4px")
                     combo_op.addItems(["+", "-", "*", "/", "norm", "wrap_180", "wrap_360", "rad2deg", "deg2rad", "ang_sub"])
                     combo_op.setCurrentText("norm")
-                    combo_op.setStyleSheet(OPERATOR_COMBO_STYLE)
                     combo_op.currentTextChanged.connect(lambda text, c=c_idx: self.on_operator_combo_changed(c, text))
                     ctrl_layout.addWidget(combo_op)
 
@@ -1270,10 +1186,9 @@ class SidebarWidget(QWidget):
                     expr_layout.addWidget(self.current_btn_op_a, stretch=1)
 
                     # Object 2: Beautified Compact Operator Dropdown
-                    combo_op = QComboBox()
+                    combo_op = CleanComboBox(font_size="10px", min_width="48px", max_width="65px", padding="1px 14px 1px 4px")
                     combo_op.addItems(["+", "-", "*", "/", "norm", "wrap_180", "wrap_360", "rad2deg", "deg2rad", "ang_sub"])
                     combo_op.setCurrentText(builder.operator)
-                    combo_op.setStyleSheet(OPERATOR_COMBO_STYLE)
                     combo_op.currentTextChanged.connect(lambda text, c=c_idx: self.on_operator_combo_changed(c, text))
                     expr_layout.addWidget(combo_op)
 

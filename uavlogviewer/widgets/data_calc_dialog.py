@@ -5,12 +5,16 @@ down to the lower sampling rate time base, scalar operations (+, -, *, /), and a
 Dependencies: PySide6, numpy, base_parser, chart_store.
 """
 import numpy as np
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
+from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QListView,
                                QLineEdit, QPushButton, QRadioButton, QButtonGroup,
                                QGroupBox, QMessageBox ,QWidget)
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QPalette
 from uavlogviewer.parsers.base_parser import ParsedLog
 from uavlogviewer.models.chart_store import ChartStore
+from uavlogviewer.gui.clean_combobox import CleanComboBox
+
+
 
 class DataCalcDialog(QDialog):
     def __init__(self, parsed_log: ParsedLog, target_chart_idx: int, chart_store: ChartStore, parent=None):
@@ -28,6 +32,8 @@ class DataCalcDialog(QDialog):
             QPushButton { background-color: #ffffff; color: #171717; border: 1px solid #e5e5e5; border-radius: 4px; padding: 6px 12px; font-weight: bold; }
             QPushButton:hover { background-color: #f0fdfa; border-color: #0d9488; }
             QLineEdit, QComboBox { background-color: #ffffff; color: #171717; border: 1px solid #e5e5e5; border-radius: 4px; padding: 4px 8px; }
+            QComboBox QAbstractItemView { background-color: #ffffff; background: #ffffff; color: #171717; border: 1px solid #e5e5e5; border-radius: 4px; padding: 0px; margin: 0px; outline: 0px; selection-background-color: #f0fdfa; selection-color: #0d9488; }
+            QComboBox QAbstractItemView::viewport { background-color: #ffffff; background: #ffffff; }
         """)
 
         layout = QVBoxLayout(self)
@@ -51,7 +57,7 @@ class DataCalcDialog(QDialog):
         op_layout = QHBoxLayout(op_box)
 
         op_layout.addWidget(QLabel("Operation:"))
-        self.op_combo = QComboBox()
+        self.op_combo = CleanComboBox(border_color="#e5e5e5", hover_bg="#f0fdfa", text_color="#171717")
         self.op_combo.addItems(["+ (Add)", "- (Subtract)", "* (Multiply)", "/ (Divide)"])
         self.op_combo.currentIndexChanged.connect(self.update_preview_name)
         op_layout.addWidget(self.op_combo, stretch=1)
@@ -65,7 +71,7 @@ class DataCalcDialog(QDialog):
         # Field A
         row_a = QHBoxLayout()
         row_a.addWidget(QLabel("Field A:"))
-        self.combo_field_a = QComboBox()
+        self.combo_field_a = CleanComboBox(border_color="#e5e5e5", hover_bg="#f0fdfa", text_color="#171717")
         self.combo_field_a.currentIndexChanged.connect(self.update_preview_name)
         row_a.addWidget(self.combo_field_a, stretch=1)
         operand_layout.addLayout(row_a)
@@ -75,7 +81,7 @@ class DataCalcDialog(QDialog):
         row_b = QHBoxLayout(self.row_b_widget)
         row_b.setContentsMargins(0, 0, 0, 0)
         row_b.addWidget(QLabel("Field B:"))
-        self.combo_field_b = QComboBox()
+        self.combo_field_b = CleanComboBox(border_color="#e5e5e5", hover_bg="#f0fdfa", text_color="#171717")
         self.combo_field_b.currentIndexChanged.connect(self.update_preview_name)
         row_b.addWidget(self.combo_field_b, stretch=1)
         operand_layout.addWidget(self.row_b_widget)
