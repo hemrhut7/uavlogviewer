@@ -112,7 +112,7 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
             chart_row_map[c_idx] = {'ts_row': row_counter}
             specs.append([{"secondary_y": True}])
             row_heights.append(1.0)
-            titles.append(f"Chart #{c_idx + 1}")
+            titles.append("")
             row_counter += 1
 
     total_rows = len(specs)

@@ -254,8 +254,8 @@ class SidebarWidget(QWidget):
         seg_layout.setSpacing(0)
 
         self.cmb_segment = CleanComboBox()
-        self.cmb_segment.addItem("⚡ Longest Segment", "longest")
-        self.cmb_segment.addItem("🌐 All Segments", "all")
+        self.cmb_segment.addItem("Longest Segment", "longest")
+        self.cmb_segment.addItem("All Segments", "all")
         self.cmb_segment.currentIndexChanged.connect(self.on_segment_combo_changed)
         seg_layout.addWidget(self.cmb_segment, stretch=1)
 
@@ -385,6 +385,14 @@ class SidebarWidget(QWidget):
                 break
 
     def populate_field_tree(self, parsed_log: ParsedLog):
+        # Save current filter text & top-level item expanded states before clearing
+        current_query = self.search_input.text() if hasattr(self, 'search_input') else ""
+        expanded_states = {}
+        if hasattr(self, 'tree'):
+            for i in range(self.tree.topLevelItemCount()):
+                item = self.tree.topLevelItem(i)
+                expanded_states[item.text(0)] = item.isExpanded()
+
         self.parsed_log = parsed_log
         self.lbl_filename.setText(f"📄 {parsed_log.filename}")
         self.lbl_filename.setStyleSheet("color: #0d9488; font-weight: bold;")
@@ -407,20 +415,29 @@ class SidebarWidget(QWidget):
 
         self.tree.blockSignals(False)
 
+        # Re-apply search filter or restore category expansion state
+        if current_query.strip():
+            self.filter_tree(current_query)
+        else:
+            for i in range(self.tree.topLevelItemCount()):
+                item = self.tree.topLevelItem(i)
+                if item.text(0) in expanded_states:
+                    item.setExpanded(expanded_states[item.text(0)])
+
         # Update Segment ComboBox
         self.cmb_segment.blockSignals(True)
         self.cmb_segment.clear()
-        self.cmb_segment.addItem("⚡ Longest Segment", "longest")
-        self.cmb_segment.addItem("🌐 All Segments", "all")
+        self.cmb_segment.addItem("Longest Segment", "longest")
+        self.cmb_segment.addItem("All Segments", "all")
 
         segments = parsed_log.get_segments()
         if segments:
             for seg in segments:
-                tag = " ⭐️ 最長" if seg.is_longest else ""
+                tag = "最長" if seg.is_longest else ""
                 start_s = f"{seg.start_time:.1f}".rstrip('0').rstrip('.') if '.' in f"{seg.start_time:.1f}" else f"{int(seg.start_time)}"
                 end_s = f"{seg.end_time:.1f}".rstrip('0').rstrip('.') if '.' in f"{seg.end_time:.1f}" else f"{int(seg.end_time)}"
                 dur_s = f"{seg.duration:.1f}".rstrip('0').rstrip('.') if '.' in f"{seg.duration:.1f}" else f"{int(seg.duration)}"
-                text = f"📌 Segment {seg.index + 1} ({start_s}s ~ {end_s}s, dt={dur_s}s){tag}"
+                text = f"Segment {seg.index + 1} ({start_s}s ~ {end_s}s, dt={dur_s}s){tag}"
                 self.cmb_segment.addItem(text, str(seg.index))
 
         curr_filter = self.chart_store.segment_filter
@@ -1171,7 +1188,7 @@ class SidebarWidget(QWidget):
                     b_layout.setContentsMargins(8, 8, 8, 8)
                     b_layout.setSpacing(6)
 
-                    title_lbl = QLabel("⚡ Math Calculation Builder")
+                    title_lbl = QLabel("Math Calculation Builder")
                     title_lbl.setStyleSheet("font-weight: bold; color: #0d9488; font-size: 11px;")
                     b_layout.addWidget(title_lbl)
 
