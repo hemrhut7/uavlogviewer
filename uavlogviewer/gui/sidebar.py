@@ -356,11 +356,6 @@ class SidebarWidget(QWidget):
         self.btn_msgs.clicked.connect(self.open_messages_requested.emit)
         t_layout.addWidget(self.btn_msgs)
 
-        self.btn_expr = QPushButton("🧮 Math Expression Editor")
-        self.btn_expr.setStyleSheet("background: #f5f5f5; color: #171717; border: 1px solid #e5e5e5; padding: 6px; border-radius: 4px;")
-        self.btn_expr.clicked.connect(self.open_expression_requested.emit)
-        t_layout.addWidget(self.btn_expr)
-
         self.btn_coord = QPushButton("🌐 Coordinate Transformation (ENU)")
         self.btn_coord.setStyleSheet("background: #f5f5f5; color: #171717; border: 1px solid #e5e5e5; padding: 6px; border-radius: 4px;")
         self.btn_coord.clicked.connect(self.open_coord_transform_requested.emit)
