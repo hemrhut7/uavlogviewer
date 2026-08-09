@@ -87,6 +87,8 @@ class SidebarWidget(QWidget):
     open_params_requested = Signal()
     open_messages_requested = Signal()
     open_expression_requested = Signal()
+    open_coord_transform_requested = Signal()
+    open_coord_transform_for_chart_requested = Signal(int)
 
     def __init__(self, chart_store: ChartStore, parent=None):
         super().__init__(parent)
@@ -358,6 +360,11 @@ class SidebarWidget(QWidget):
         self.btn_expr.setStyleSheet("background: #f5f5f5; color: #171717; border: 1px solid #e5e5e5; padding: 6px; border-radius: 4px;")
         self.btn_expr.clicked.connect(self.open_expression_requested.emit)
         t_layout.addWidget(self.btn_expr)
+
+        self.btn_coord = QPushButton("🌐 Coordinate Transformation (ENU)")
+        self.btn_coord.setStyleSheet("background: #f5f5f5; color: #171717; border: 1px solid #e5e5e5; padding: 6px; border-radius: 4px;")
+        self.btn_coord.clicked.connect(self.open_coord_transform_requested.emit)
+        t_layout.addWidget(self.btn_coord)
 
         other_layout.addWidget(tools_box)
         other_layout.addStretch()
@@ -933,6 +940,12 @@ class SidebarWidget(QWidget):
                 btn_pts.setStyleSheet("background: transparent; color: #ea580c; border: 1px solid #fed7aa; border-radius: 3px; font-size: 10px; padding: 1px 5px;")
                 btn_pts.clicked.connect(lambda _, c_i=c_idx: self.prompt_custom_max_points(c_i))
                 h_layout.addWidget(btn_pts)
+
+                btn_enu = QPushButton("🌐 ENU")
+                btn_enu.setToolTip("Convert Lat/Lon/Alt to local ENU coordinates and set X=East, Y=North")
+                btn_enu.setStyleSheet("background: transparent; color: #ea580c; border: 1px solid #fed7aa; border-radius: 3px; font-size: 10px; padding: 1px 5px;")
+                btn_enu.clicked.connect(lambda _, c_i=c_idx: self.open_coord_transform_for_chart_requested.emit(c_i))
+                h_layout.addWidget(btn_enu)
 
                 if len(self.chart_store.charts) > 1:
                     btn_rm_chart = QPushButton("❌")

@@ -51,7 +51,42 @@ def filter_by_segment(t_arr: np.ndarray, y_arr: np.ndarray, parsed_log: ParsedLo
 
     if target_seg:
         mask = (t_arr >= target_seg.start_time) & (t_arr <= target_seg.end_time)
-        return t_arr[mask], y_arr[mask]
+        if np.count_nonzero(mask) > 0:
+            return t_arr[mask], y_arr[mask]
+        return t_arr, y_arr
+
+    return t_arr, y_arr
+
+def get_series_data_and_timestamps(parsed_log: ParsedLog, key: str) -> tuple:
+    """Safely retrieves y_arr and t_arr for a key, trying 'key', 'CALC.key', or 'key without CALC.'."""
+    if not key or not parsed_log or not parsed_log.time_series:
+        return np.array([]), np.array([])
+
+    cand_keys = [key]
+    if not key.startswith("CALC."):
+        cand_keys.append(f"CALC.{key}")
+    else:
+        cand_keys.append(key.replace("CALC.", ""))
+
+    real_key = None
+    for k in cand_keys:
+        if k in parsed_log.time_series:
+            real_key = k
+            break
+
+    if not real_key:
+        return np.array([]), np.array([])
+
+    y_arr = sanitize_array(parsed_log.time_series[real_key])
+    t_arr = parsed_log.timestamps.get(
+        real_key,
+        parsed_log.timestamps.get(
+            real_key.split('.')[0],
+            parsed_log.timestamps.get("CALC", np.arange(len(y_arr)))
+        )
+    )
+    if len(t_arr) != len(y_arr):
+        t_arr = np.arange(len(y_arr))
 
     return t_arr, y_arr
 
@@ -154,17 +189,12 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                 if x_key: last_x_key = x_key
                 if y_key: last_y_key = y_key
 
-                x_t_arr, x_y_arr = np.array([]), np.array([])
-                y_t_arr, y_y_arr = np.array([]), np.array([])
-
-                if x_key in parsed_log.time_series:
-                    x_y_arr = sanitize_array(parsed_log.time_series[x_key])
-                    x_t_arr = parsed_log.timestamps.get(x_key, parsed_log.timestamps.get(x_key.split('.')[0], np.arange(len(x_y_arr))))
+                if x_key:
+                    x_t_arr, x_y_arr = get_series_data_and_timestamps(parsed_log, x_key)
                     x_t_arr, x_y_arr = filter_by_segment(x_t_arr, x_y_arr, parsed_log, chart_store.segment_filter)
 
-                if y_key in parsed_log.time_series:
-                    y_y_arr = sanitize_array(parsed_log.time_series[y_key])
-                    y_t_arr = parsed_log.timestamps.get(y_key, parsed_log.timestamps.get(y_key.split('.')[0], np.arange(len(y_y_arr))))
+                if y_key:
+                    y_t_arr, y_y_arr = get_series_data_and_timestamps(parsed_log, y_key)
                     y_t_arr, y_y_arr = filter_by_segment(y_t_arr, y_y_arr, parsed_log, chart_store.segment_filter)
 
                 if len(x_y_arr) > 0 and len(y_y_arr) > 0:
@@ -282,20 +312,9 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
 
             for expr in chart.expressions:
                 field_key = expr.name
-                if field_key not in parsed_log.time_series:
+                t_arr, y_arr = get_series_data_and_timestamps(parsed_log, field_key)
+                if len(y_arr) == 0:
                     continue
-
-                if field_key in parsed_log.timestamps:
-                    t_arr = parsed_log.timestamps[field_key]
-                else:
-                    msg_type = field_key.split('.')[0]
-                    t_arr = parsed_log.timestamps.get(msg_type, np.array([]))
-
-                y_arr = sanitize_array(parsed_log.time_series[field_key])
-
-                if len(t_arr) != len(y_arr):
-                    t_arr = np.arange(len(y_arr))
-
                 t_arr, y_arr = filter_by_segment(t_arr, y_arr, parsed_log, chart_store.segment_filter)
 
                 use_secondary = (expr.axis == 1)

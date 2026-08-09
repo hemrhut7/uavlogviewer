@@ -20,6 +20,7 @@ from uavlogviewer.parsers.dji_parser import DjiParser
 from uavlogviewer.widgets.param_viewer import ParamViewerDialog
 from uavlogviewer.widgets.message_viewer import MessageViewerDialog
 from uavlogviewer.widgets.expression_editor import ExpressionEditorDialog
+from uavlogviewer.widgets.coord_transform_dialog import CoordTransformDialog
 
 MAIN_WINDOW_STYLE = """
 QMainWindow { background-color: #fafafa; color: #171717; }
@@ -132,6 +133,8 @@ class MainWindow(QMainWindow):
         self.sidebar.open_params_requested.connect(self.open_param_viewer)
         self.sidebar.open_messages_requested.connect(self.open_message_viewer)
         self.sidebar.open_expression_requested.connect(self.open_expression_editor)
+        self.sidebar.open_coord_transform_requested.connect(self.open_coord_transform)
+        self.sidebar.open_coord_transform_for_chart_requested.connect(self.open_coord_transform_for_chart)
         self.splitter.addWidget(self.sidebar)
 
         # Right Main Plot Container
@@ -237,3 +240,25 @@ class MainWindow(QMainWindow):
         self.open_message_viewer()
         if self.message_dialog:
             self.message_dialog.scroll_to_timestamp(timestamp)
+
+    def open_coord_transform(self):
+        if not self.parsed_log:
+            QMessageBox.information(self, "No Log Loaded", "Please load a log file first.")
+            return
+        dialog = CoordTransformDialog(self.parsed_log, self.chart_store, target_chart_idx=None, parent=self)
+        dialog.calculation_completed.connect(self.on_coord_transform_completed)
+        dialog.exec_()
+
+    def open_coord_transform_for_chart(self, chart_idx: int):
+        if not self.parsed_log:
+            QMessageBox.information(self, "No Log Loaded", "Please load a log file first.")
+            return
+        dialog = CoordTransformDialog(self.parsed_log, self.chart_store, target_chart_idx=chart_idx, parent=self)
+        dialog.calculation_completed.connect(self.on_coord_transform_completed)
+        dialog.exec_()
+
+    @Slot(str, str, str)
+    def on_coord_transform_completed(self, res_e: str, res_n: str, res_u: str):
+        self.sidebar.populate_field_tree(self.parsed_log)
+        self.plot_container.update_plots()
+        self.status_bar.showMessage(f"Coordinates transformed to ENU: {res_e}, {res_n}, {res_u}")
