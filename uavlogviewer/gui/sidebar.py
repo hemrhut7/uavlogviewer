@@ -510,19 +510,20 @@ class SidebarWidget(QWidget):
             if parent_match or child_match_count > 0:
                 parent.setExpanded(bool(query))
 
-    def show_xy_context_menu(self, pos, chart_idx: int):
+    def show_chart_context_menu(self, pos, chart_idx: int):
         chart = self.chart_store.charts[chart_idx]
-        if chart.chart_type != "scatter":
-            return
-
         menu = QMenu(self)
-        title_str = "Unlimited" if chart.max_points <= 0 else f"{chart.max_points:,} pts"
-        title_act = menu.addAction(f"⚙️ Scatter Max Points Limit ({title_str})")
+        title_str = "Unlimited (Full)" if chart.max_points <= 0 else f"{chart.max_points:,} pts"
+        title_act = menu.addAction(f"⚙️ Max Points Limit ({title_str})")
         title_act.setEnabled(False)
         menu.addSeparator()
 
-        limits = [1000, 5000, 10000, 50000, 0]
-        labels = ["1,000 pts", "5,000 pts (Default)", "10,000 pts", "50,000 pts", "Unlimited (All Points)"]
+        if chart.chart_type == "scatter":
+            limits = [1000, 5000, 10000, 50000, 0]
+            labels = ["1,000 pts", "5,000 pts (Default)", "10,000 pts", "50,000 pts", "Unlimited (All Points)"]
+        else:
+            limits = [5000, 10000, 20000, 50000, 100000, 0]
+            labels = ["5,000 pts", "10,000 pts (Default)", "20,000 pts", "50,000 pts", "100,000 pts", "Unlimited (All Points / 不簡化)"]
 
         for limit, label in zip(limits, labels):
             act = menu.addAction(label)
@@ -538,9 +539,13 @@ class SidebarWidget(QWidget):
         sender_widget = self.sender() if isinstance(self.sender(), QWidget) else self
         menu.exec_(sender_widget.mapToGlobal(pos))
 
+    def show_xy_context_menu(self, pos, chart_idx: int):
+        self.show_chart_context_menu(pos, chart_idx)
+
     def prompt_custom_max_points(self, chart_idx: int):
         chart = self.chart_store.charts[chart_idx]
-        val, ok = QInputDialog.getInt(self, "Max Scatter Points Limit", "Enter max points limit (0 for Unlimited):", value=chart.max_points, minValue=0, maxValue=1000000)
+        title = "Max Scatter Points Limit" if chart.chart_type == "scatter" else "Max Time Series Points Limit"
+        val, ok = QInputDialog.getInt(self, title, "Enter max points limit (0 for Unlimited / Full points):", value=chart.max_points, minValue=0, maxValue=10000000)
         if ok:
             self.chart_store.set_chart_max_points(chart_idx, val)
 
@@ -1003,6 +1008,9 @@ class SidebarWidget(QWidget):
                     QFrame { background-color: #ffffff; border: 1px solid #e5e5e5; border-radius: 6px; margin-bottom: 8px; }
                 """)
 
+            card.setContextMenuPolicy(Qt.CustomContextMenu)
+            card.customContextMenuRequested.connect(lambda pos, c_i=c_idx: self.show_chart_context_menu(pos, c_i))
+
             card_layout = QVBoxLayout(card)
             card_layout.setContentsMargins(8, 8, 8, 8)
             card_layout.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
@@ -1018,6 +1026,13 @@ class SidebarWidget(QWidget):
             h_layout.addWidget(radio_btn)
 
             h_layout.addStretch()
+
+            pts_str = "Unlimited" if chart.max_points <= 0 else f"{chart.max_points:,} pts"
+            btn_pts = QPushButton(f"⚙️ {pts_str}")
+            btn_pts.setToolTip("Right-click card or click here to adjust max render points limit (0 for Full / Unlimited)")
+            btn_pts.setStyleSheet("background: transparent; color: #0d9488; border: 1px solid #99f6e4; border-radius: 3px; font-size: 10px; padding: 1px 5px;")
+            btn_pts.clicked.connect(lambda _, c_i=c_idx: self.prompt_custom_max_points(c_i))
+            h_layout.addWidget(btn_pts)
 
             if len(self.chart_store.charts) > 1:
                 btn_rm_chart = QPushButton("❌")

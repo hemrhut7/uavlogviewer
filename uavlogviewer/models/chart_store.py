@@ -43,7 +43,7 @@ class ChartPanel:
         self.pairs: List[XYScatterPair] = []
         self.active_pair_idx: int = 0
         self.active_xy_target: str = 'X'  # 'X' or 'Y'
-        self.max_points: int = 5000  # Default max rendering points limit for scatter
+        self.max_points: int = 10000 if chart_type == "timeseries" else 5000  # Default max rendering points (0 for Unlimited / full resolution)
 
     @property
     def x_field(self) -> str:

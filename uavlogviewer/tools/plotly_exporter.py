@@ -304,8 +304,9 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                 else:
                     axis1_fields.append(field_key)
 
-                # Downsample if > 10000 points for smooth performance
-                step_ts = max(1, len(t_arr) // 10000) if len(t_arr) > 10000 else 1
+                # Downsample if max_points > 0 and len > max_points (0 for Unlimited / full resolution)
+                max_pts = getattr(chart, 'max_points', 10000)
+                step_ts = max(1, len(t_arr) // max_pts) if (max_pts > 0 and len(t_arr) > max_pts) else 1
 
                 fig.add_trace(
                     go.Scattergl(
