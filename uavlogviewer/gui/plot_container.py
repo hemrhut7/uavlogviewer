@@ -16,7 +16,7 @@ import numpy as np
 from typing import Optional, List
 from uavlogviewer.parsers.base_parser import ParsedLog
 from uavlogviewer.models.chart_store import ChartStore
-from uavlogviewer.tools.plotly_exporter import generate_plotly_html, filter_by_segment
+from uavlogviewer.tools.plotly_exporter import generate_plotly_html, filter_by_segment, get_series_data_and_timestamps
 
 class PlotContainer(QWidget):
     point_alt_clicked = Signal(float)
@@ -179,20 +179,9 @@ class PlotContainer(QWidget):
         for c_idx, chart in enumerate(active_charts):
             for expr in chart.expressions:
                 field_key = expr.name
-                if field_key not in self.parsed_log.time_series:
+                t_arr, y_arr = get_series_data_and_timestamps(self.parsed_log, field_key)
+                if len(y_arr) == 0:
                     continue
-
-                if field_key in self.parsed_log.timestamps:
-                    t_arr = self.parsed_log.timestamps[field_key]
-                else:
-                    msg_type = field_key.split('.')[0]
-                    t_arr = self.parsed_log.timestamps.get(msg_type, np.array([]))
-
-                y_arr = self.parsed_log.time_series[field_key]
-
-                if len(t_arr) != len(y_arr):
-                    t_arr = np.arange(len(y_arr))
-
                 t_arr, y_arr = filter_by_segment(t_arr, y_arr, self.parsed_log, self.chart_store.segment_filter)
 
                 if x0 is not None and x1 is not None and len(t_arr) > 0:
