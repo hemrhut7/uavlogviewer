@@ -59,18 +59,33 @@ class ExpressionEditorDialog(QDialog):
         var_map: Dict[str, str] = {}
         processed_expr = expr
         
-        for key, arr in self.parsed_log.time_series.items():
-            if key in expr:
-                safe_var = key.replace('.', '_')
-                var_map[key] = safe_var
-                eval_dict[safe_var] = arr
-                processed_expr = processed_expr.replace(key, safe_var)
+        matching_keys = [k for k in self.parsed_log.time_series.keys() if k in expr]
+        # Sort descending by length so longer names (e.g. GPS.AltMSL) are replaced before shorter prefixes (GPS.Alt)
+        matching_keys.sort(key=len, reverse=True)
+
+        for key in matching_keys:
+            arr = self.parsed_log.time_series[key]
+            safe_var = key.replace('.', '_').replace('[', '_').replace(']', '_')
+            var_map[key] = safe_var
+            eval_dict[safe_var] = arr
+            processed_expr = processed_expr.replace(key, safe_var)
 
         try:
             res = eval(processed_expr, {"__builtins__": {}}, eval_dict)
             if not isinstance(res, np.ndarray):
-                res = np.full_like(next(iter(self.parsed_log.time_series.values())), float(res))
+                ref_arr = eval_dict[next(iter(var_map.values()))] if var_map else next(iter(self.parsed_log.time_series.values()))
+                res = np.full_like(ref_arr, float(res))
             
+            # Determine primary timestamps from the first input variable used
+            primary_timestamps = None
+            for key in matching_keys:
+                mtype = key.split('.')[0]
+                if mtype in self.parsed_log.timestamps:
+                    primary_timestamps = self.parsed_log.timestamps[mtype]
+                    break
+            if primary_timestamps is None:
+                primary_timestamps = next(iter(self.parsed_log.timestamps.values()), np.array([]))
+
             # Store calculated series in parsed_log
             msg_group = channel_name.split('.')[0] if '.' in channel_name else "CALC"
             field_name = channel_name.split('.')[1] if '.' in channel_name else channel_name
@@ -78,13 +93,13 @@ class ExpressionEditorDialog(QDialog):
 
             if msg_group not in self.parsed_log.field_tree:
                 self.parsed_log.field_tree[msg_group] = []
-                self.parsed_log.timestamps[msg_group] = next(iter(self.parsed_log.timestamps.values()), np.array([]))
+                self.parsed_log.timestamps[msg_group] = primary_timestamps
 
             if field_name not in self.parsed_log.field_tree[msg_group]:
                 self.parsed_log.field_tree[msg_group].append(field_name)
 
             self.parsed_log.time_series[full_key] = res
-            self.parsed_log.timestamps[full_key] = self.parsed_log.timestamps.get(msg_group, next(iter(self.parsed_log.timestamps.values()), np.array([])))
+            self.parsed_log.timestamps[full_key] = primary_timestamps
             self.created_field_key = full_key
 
             QMessageBox.information(self, "Success", f"Successfully created custom channel '{full_key}'!")

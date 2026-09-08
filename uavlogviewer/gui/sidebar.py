@@ -436,8 +436,8 @@ class SidebarWidget(QWidget):
         # Update Segment ComboBox
         self.cmb_segment.blockSignals(True)
         self.cmb_segment.clear()
-        self.cmb_segment.addItem("Longest Segment", "longest")
         self.cmb_segment.addItem("All Segments", "all")
+        self.cmb_segment.addItem("Longest Segment", "longest")
 
         segments = parsed_log.get_segments()
         if segments:
@@ -458,7 +458,7 @@ class SidebarWidget(QWidget):
                 break
         if not found:
             self.cmb_segment.setCurrentIndex(0)
-            self.chart_store.segment_filter = "longest"
+            self.chart_store.segment_filter = "all"
 
         self.cmb_segment.blockSignals(False)
         self.rebuild_setup_panel()

@@ -108,22 +108,23 @@ def _parse_offsets_chunk(
     import numpy as np
     
     unpack_struct = struct.Struct(msg_struct)
-    unpacker = unpack_struct.unpack
+    unpack_from = unpack_struct.unpack_from
     body_len = unpack_struct.size
     rows: list[tuple] = []
     skipped = 0
 
     with open(bin_path, "rb") as f:
         size = os.path.getsize(bin_path)
+        if size == 0:
+            return pd.DataFrame(columns=columns), 0
         data_map = mmap.mmap(f.fileno(), size, access=mmap.ACCESS_READ)
         try:
             for ofs in offsets:
-                body_start = ofs + 3
-                body_end = body_start + body_len
-                if body_end > size:
+                body_start = int(ofs) + 3
+                if body_start + body_len > size:
                     skipped += 1
                     continue
-                rows.append(unpacker(data_map[body_start:body_end]))
+                rows.append(unpack_from(data_map, body_start))
         finally:
             data_map.close()
             
@@ -157,6 +158,7 @@ def parse_bin_log(
     target_types: list[str],
     *,
     ignore_gps_clock: str | bool = "auto",
+    mlog: Any = None,
 ) -> dict[str, pd.DataFrame]:
     """High-performance parallel binary parser for ArduPilot ``.bin`` logs.
 
@@ -174,6 +176,8 @@ def parse_bin_log(
                             bypassed for instant speedup.
                           - ``True``: Clock scanning is unconditionally bypassed.
                           - ``False``: Clock scanning is always executed.
+        mlog:             Optional pre-scanned pymavlink connection object. If provided,
+                          Phase 1 scanning is bypassed and mlog is kept open.
 
     Returns:
         A dict mapping each requested message type name to a
@@ -196,99 +200,125 @@ def parse_bin_log(
     # Deduplicate while preserving order
     target_types = list(dict.fromkeys(target_types))
 
-    # ------------------------------------------------------------------
-    # Phase 1 — pymavlink scan (builds name_to_id, formats, offsets)
-    # ------------------------------------------------------------------
-    from pymavlink.DFReader import DFReader_binary, DFReaderClock_usec
-    orig_init_clock = DFReader_binary.init_clock
+    close_mlog = False
+    if mlog is None:
+        close_mlog = True
+        # ------------------------------------------------------------------
+        # Phase 1 — pymavlink scan (builds name_to_id, formats, offsets)
+        # ------------------------------------------------------------------
+        from pymavlink.DFReader import DFReader_binary, DFReaderClock_usec
+        orig_init_clock = DFReader_binary.init_clock
 
-    def fast_init_clock(self):
-        self.clock = DFReaderClock_usec()
-        self._rewind(keep_messages=True)
+        def fast_init_clock(self):
+            self.clock = DFReaderClock_usec()
+            self._rewind(keep_messages=True)
 
-    def auto_init_clock(self):
-        if hasattr(self, "offsets") and self.offsets is not None:
-            gps_type = self.name_to_id.get("GPS")
-            gps2_type = self.name_to_id.get("GPS2")
-            time_type = self.name_to_id.get("TIME")
+        def auto_init_clock(self):
+            if hasattr(self, "offsets") and self.offsets is not None:
+                gps_type = self.name_to_id.get("GPS")
+                gps2_type = self.name_to_id.get("GPS2")
+                time_type = self.name_to_id.get("TIME")
 
-            has_gps = gps_type is not None and len(self.offsets[gps_type]) > 0
-            has_gps2 = gps2_type is not None and len(self.offsets[gps2_type]) > 0
-            has_time = time_type is not None and len(self.offsets[time_type]) > 0
+                has_gps = gps_type is not None and len(self.offsets[gps_type]) > 0
+                has_gps2 = gps2_type is not None and len(self.offsets[gps2_type]) > 0
+                has_time = time_type is not None and len(self.offsets[time_type]) > 0
 
-            if not (has_gps or has_gps2 or has_time):
-                self.clock = DFReaderClock_usec()
-                self._rewind(keep_messages=True)
-                return
-        return orig_init_clock(self)
+                if not (has_gps or has_gps2 or has_time):
+                    self.clock = DFReaderClock_usec()
+                    self._rewind(keep_messages=True)
+                    return
+            return orig_init_clock(self)
 
-    # Patch dynamically depending on mode
-    if ignore_gps_clock is True:
-        DFReader_binary.init_clock = fast_init_clock
-    elif ignore_gps_clock == "auto":
-        DFReader_binary.init_clock = auto_init_clock
+        # Patch dynamically depending on mode
+        if ignore_gps_clock is True:
+            DFReader_binary.init_clock = fast_init_clock
+        elif ignore_gps_clock == "auto":
+            DFReader_binary.init_clock = auto_init_clock
 
-    try:
-        mlog = mavutil.mavlink_connection(bin_path)
-    finally:
-        DFReader_binary.init_clock = orig_init_clock
+        try:
+            mlog = mavutil.mavlink_connection(bin_path)
+        finally:
+            DFReader_binary.init_clock = orig_init_clock
 
-    # Determine worker count
-    cpu_count = os.cpu_count() or 4
-    num_workers = max(1, int(max(cpu_count - 4, cpu_count / 2)))
+    # Count total offsets across target types
+    total_offsets = 0
+    for tname in target_types:
+        tid = mlog.name_to_id.get(tname)
+        if tid is not None and tid < len(mlog.offsets):
+            total_offsets += len(mlog.offsets[tid])
 
-    # ------------------------------------------------------------------
-    # Phase 2 & 3 — dispatch parallel unpacking and DataFrame construction
-    # ------------------------------------------------------------------
-    futures: list[tuple[str, object]] = []
+    data_by_type: dict[str, list[pd.DataFrame]] = {t: [] for t in target_types}
 
-    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+    # If small workload, run sequentially in-process to avoid process pool overhead
+    if total_offsets < 30_000:
         for tname in target_types:
             tid = mlog.name_to_id.get(tname)
-            if tid is None:
+            if tid is None or tid >= len(mlog.offsets):
                 continue
-            fmt = mlog.formats[tid]
+            fmt = mlog.formats.get(tid)
             offsets = mlog.offsets[tid]
-            if not offsets:
+            if not fmt or len(offsets) == 0:
                 continue
-
-            chunk_size = max(20_000, len(offsets) // num_workers)
-            for i in range(0, len(offsets), chunk_size):
-                chunk = offsets[i : i + chunk_size]
-                futures.append((
-                    tname,
-                    executor.submit(
-                        _parse_offsets_chunk,
-                        bin_path,
-                        chunk,
-                        fmt.msg_struct,
-                        fmt.len,
-                        fmt.columns,
-                        fmt.msg_mults
-                    ),
-                ))
-
-        # Gather DataFrames directly
-        data_by_type: dict[str, list[pd.DataFrame]] = {t: [] for t in target_types}
-        skipped_total: dict[str, int] = {t: 0 for t in target_types}
-
-        for tname, future in futures:
-            df_chunk, skipped = future.result()
+            df_chunk, _ = _parse_offsets_chunk(
+                bin_path,
+                offsets,
+                fmt.msg_struct,
+                fmt.len,
+                fmt.columns,
+                fmt.msg_mults
+            )
             data_by_type[tname].append(df_chunk)
-            skipped_total[tname] += skipped
+    else:
+        # Determine worker count
+        cpu_count = os.cpu_count() or 4
+        if len(target_types) == 1:
+            num_workers = min(4, cpu_count)
+        else:
+            num_workers = min(8, max(1, int(max(cpu_count - 4, cpu_count / 2))))
+
+        # ------------------------------------------------------------------
+        # Phase 2 & 3 — dispatch parallel unpacking and DataFrame construction
+        # ------------------------------------------------------------------
+        futures: list[tuple[str, object]] = []
+
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            for tname in target_types:
+                tid = mlog.name_to_id.get(tname)
+                if tid is None or tid >= len(mlog.offsets):
+                    continue
+                fmt = mlog.formats.get(tid)
+                offsets = mlog.offsets[tid]
+                if not fmt or len(offsets) == 0:
+                    continue
+
+                chunk_size = max(20_000, len(offsets) // num_workers)
+                for i in range(0, len(offsets), chunk_size):
+                    chunk = offsets[i : i + chunk_size]
+                    futures.append((
+                        tname,
+                        executor.submit(
+                            _parse_offsets_chunk,
+                            bin_path,
+                            chunk,
+                            fmt.msg_struct,
+                            fmt.len,
+                            fmt.columns,
+                            fmt.msg_mults
+                        ),
+                    ))
+
+            for tname, future in futures:
+                df_chunk, _ = future.result()
+                data_by_type[tname].append(df_chunk)
 
     # Concatenate chunked DataFrames
     result: dict[str, pd.DataFrame] = {}
-
-    # Close the pymavlink file handle
-    if hasattr(mlog, 'close'):
-        mlog.close()
 
     for tname in target_types:
         df_list = data_by_type[tname]
         if not df_list:
             tid = mlog.name_to_id.get(tname)
-            cols = mlog.formats[tid].columns if tid is not None else []
+            cols = mlog.formats[tid].columns if (tid is not None and tid in mlog.formats) else []
             result[tname] = pd.DataFrame(columns=cols)
             continue
             
@@ -296,6 +326,13 @@ def parse_bin_log(
             result[tname] = df_list[0]
         else:
             result[tname] = pd.concat(df_list, ignore_index=True)
+
+    # Close the pymavlink file handle if we created it
+    if close_mlog and hasattr(mlog, 'close'):
+        try:
+            mlog.close()
+        except Exception:
+            pass
 
     return result
 

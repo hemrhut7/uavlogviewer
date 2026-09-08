@@ -5,13 +5,72 @@ Leverages parallel mmap unpacking via fast_log_reader for 10x-30x speedups on .b
 
 Dependencies: pymavlink, numpy, pandas, base_parser, fast_log_reader.
 """
+import mmap
+import struct
+import sys
 import os
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Any
 from pymavlink import DFReader, mavutil
-from uavlogviewer.parsers.base_parser import BaseParser, ParsedLog, FlightModeSpan, LogEvent, MODE_COLORS, get_flight_mode_info, is_valid_instance_column
+from uavlogviewer.parsers.base_parser import (
+    BaseParser,
+    ParsedLog,
+    FlightModeSpan,
+    LogEvent,
+    MODE_COLORS,
+    get_flight_mode_info,
+    is_valid_instance_column,
+    LazyTimeSeriesDict,
+    LazyTimestampsDict,
+)
 from uavlogviewer.parsers.fast_log_reader import parse_bin_log
+
+
+INSTANCE_CANDIDATE_COLUMNS = ('C', 'I', 'Instance', 'instance', 'Inst', 'Core', 'Id', 'ID', 'Num')
+
+
+def _clean_str(val: Any) -> str:
+    """Decodes bytes to utf-8 and strips trailing null padding bytes from struct-unpacked strings."""
+    if isinstance(val, (bytes, bytearray)):
+        return val.decode('utf-8', errors='replace').rstrip('\x00').strip()
+    return str(val).rstrip('\x00').strip()
+
+
+class SilenceStderr:
+    """Context manager to suppress C/Python-level stderr during noisy pymavlink scanning."""
+    def __enter__(self):
+        self.active = False
+        self.null_fd = None
+        self.orig_fd2 = None
+        try:
+            sys.stderr.flush()
+            self.null_fd = os.open(os.devnull, os.O_RDWR)
+            self.orig_fd2 = os.dup(2)
+            os.dup2(self.null_fd, 2)
+            self.active = True
+        except Exception:
+            if self.orig_fd2 is not None:
+                try:
+                    os.close(self.orig_fd2)
+                except Exception:
+                    pass
+            if self.null_fd is not None:
+                try:
+                    os.close(self.null_fd)
+                except Exception:
+                    pass
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.active:
+            try:
+                os.dup2(self.orig_fd2, 2)
+                os.close(self.orig_fd2)
+                os.close(self.null_fd)
+            except Exception:
+                pass
+
 
 def is_binary_log(filepath: str) -> bool:
     if filepath.lower().endswith('.bin'):
@@ -22,6 +81,7 @@ def is_binary_log(filepath: str) -> bool:
             return header == b'\xa3\x95'
     except Exception:
         return False
+
 
 class DataflashParser(BaseParser):
     def parse(self, filepath: str) -> ParsedLog:
@@ -36,66 +96,135 @@ class DataflashParser(BaseParser):
             return self._parse_text(filepath, parsed)
 
     def _parse_binary_fast(self, filepath: str, parsed: ParsedLog) -> ParsedLog:
+        file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+        if file_size == 0:
+            return parsed
+
         try:
-            mlog = mavutil.mavlink_connection(filepath)
-            all_types = list(mlog.name_to_id.keys())
+            with SilenceStderr():
+                mlog = mavutil.mavlink_connection(filepath)
         except Exception as e:
             print(f"Error opening MAVLink connection for {filepath}: {e}")
             return parsed
 
-        # Fast parallel mmap parse
-        dfs = parse_bin_log(filepath, all_types, ignore_gps_clock="auto")
+        field_tree = {}
+        instances_by_type = {}
+        end_timestamp = 0.0
 
-        # Process PARM
-        if 'PARM' in dfs and not dfs['PARM'].empty:
-            df_parm = dfs['PARM']
-            for _, row in df_parm.iterrows():
-                pname = str(row.get('Name', row.get('Param_Name', '')))
-                pval = row.get('Value', row.get('Param_Value', 0.0))
-                if pname:
-                    parsed.params[pname] = pval
+        with open(filepath, 'rb') as f:
+            with mmap.mmap(f.fileno(), file_size, access=mmap.ACCESS_READ) as mm:
+                for tname, tid in mlog.name_to_id.items():
+                    fmt = mlog.formats.get(tid)
+                    if not fmt:
+                        continue
+                    cols = fmt.columns
+                    offsets = mlog.offsets[tid] if tid < len(mlog.offsets) else []
+                    if len(offsets) == 0:
+                        continue
 
-        # Process MSG
-        if 'MSG' in dfs and not dfs['MSG'].empty:
-            df_msg = dfs['MSG']
-            time_col = 'TimeUS' if 'TimeUS' in df_msg.columns else ('time_us' if 'time_us' in df_msg.columns else None)
-            for _, row in df_msg.iterrows():
-                t = (row[time_col] / 1e6) if time_col and pd.notnull(row[time_col]) else 0.0
-                txt = str(row.get('Message', row.get('Text', '')))
-                parsed.text_messages.append({'time': t, 'text': txt})
+                    time_col = None
+                    for c in ['TimeUS', 'time_us', 'TimeMS', 'Time']:
+                        if c in cols:
+                            time_col = c
+                            break
 
-        # Process EV (Events)
-        if 'EV' in dfs and not dfs['EV'].empty:
-            df_ev = dfs['EV']
-            time_col = 'TimeUS' if 'TimeUS' in df_ev.columns else ('time_us' if 'time_us' in df_ev.columns else None)
-            for _, row in df_ev.iterrows():
-                t = (row[time_col] / 1e6) if time_col and pd.notnull(row[time_col]) else 0.0
-                ev_id = str(row.get('Id', row.get('Event', '')))
-                parsed.events.append(LogEvent(time=t, name=f"EV: {ev_id}", event_type="EVENT"))
+                    inst_col = None
+                    inst_idx = -1
+                    for c in INSTANCE_CANDIDATE_COLUMNS:
+                        if c in cols and c != time_col:
+                            inst_col = c
+                            inst_idx = cols.index(c)
+                            break
 
-        # Process MODE
-        last_timestamp = 0.0
-        if 'MODE' in dfs and not dfs['MODE'].empty:
-            df_mode = dfs['MODE']
-            time_col = 'TimeUS' if 'TimeUS' in df_mode.columns else ('time_us' if 'time_us' in df_mode.columns else None)
-            flight_mode_events = []
-            for _, row in df_mode.iterrows():
-                t = (row[time_col] / 1e6) if time_col and pd.notnull(row[time_col]) else 0.0
-                m_str = str(row.get('Mode', row.get('ModeNum', 'UNKNOWN')))
-                flight_mode_events.append((t, m_str))
+                    is_inst = False
+                    unique_insts = []
+                    if inst_col is not None and inst_idx >= 0:
+                        s = struct.Struct(fmt.msg_struct)
+                        step = max(1, len(offsets) // 200)
+                        sample_offsets = offsets[::step][:200]
+                        sample_vals = []
+                        for ofs in sample_offsets:
+                            ofs_int = int(ofs)
+                            if ofs_int + 3 + s.size <= file_size:
+                                sample_vals.append(s.unpack_from(mm, ofs_int + 3)[inst_idx])
 
-            # Build flight mode intervals
-            for i in range(len(flight_mode_events)):
-                t0, mode_raw = flight_mode_events[i]
-                t1 = flight_mode_events[i + 1][0] if i + 1 < len(flight_mode_events) else t0 + 10.0
-                mode_name, color = get_flight_mode_info(mode_raw)
-                parsed.flight_modes.append(FlightModeSpan(name=mode_name, start_time=t0, end_time=t1, color=color))
+                        if sample_vals and is_valid_instance_column(tname, inst_col, sample_vals):
+                            is_inst = True
+                            unique_insts = sorted(list(set(sample_vals)))
 
-        # Store all message series into parsed log
-        for mtype, df in dfs.items():
-            if df.empty or mtype in ['PARM', 'FMT', 'FMTU']:
-                continue
+                    if is_inst and unique_insts:
+                        instances_by_type[tname] = (inst_col, unique_insts)
+                        fields = [c for c in cols if c != time_col]
+                        for u in unique_insts:
+                            try:
+                                u_f = float(u)
+                                inst_str = f"[{int(u_f)}]" if u_f.is_integer() else f"[{u_f}]"
+                            except (ValueError, TypeError):
+                                inst_str = f"[{u}]"
+                            field_tree[f"{tname}{inst_str}"] = fields
+                    else:
+                        fields = [c for c in cols if c != time_col]
+                        field_tree[tname] = fields
 
+                # Quick duration check from most frequent message with TimeUS
+                total_duration = 0.0
+                for candidate_type in ['ATT', 'IMU', 'XKF1', 'POS', 'GPS', 'MODE']:
+                    cid = mlog.name_to_id.get(candidate_type)
+                    if cid is not None and cid < len(mlog.offsets) and len(mlog.offsets[cid]) > 1:
+                        fmt = mlog.formats[cid]
+                        if 'TimeUS' in fmt.columns:
+                            time_idx = fmt.columns.index('TimeUS')
+                            s = struct.Struct(fmt.msg_struct)
+                            first_ofs = mlog.offsets[cid][0]
+                            last_ofs = mlog.offsets[cid][-1]
+                            if first_ofs + 3 + s.size <= file_size and last_ofs + 3 + s.size <= file_size:
+                                t0 = s.unpack_from(mm, first_ofs + 3)[time_idx] / 1e6
+                                t1 = s.unpack_from(mm, last_ofs + 3)[time_idx] / 1e6
+                                if t1 > t0:
+                                    total_duration = t1 - t0
+                                    end_timestamp = t1
+                                    break
+
+        parsed.field_tree = field_tree
+        parsed.total_log_duration = total_duration
+
+        # Compute estimated rates for all types in field_tree
+        if total_duration > 0:
+            for tname, tid in mlog.name_to_id.items():
+                if tid < len(mlog.offsets):
+                    count = len(mlog.offsets[tid])
+                    if count > 1:
+                        if tname in instances_by_type:
+                            inst_col, u_insts = instances_by_type[tname]
+                            rate = (count / max(1, len(u_insts))) / total_duration
+                            for u in u_insts:
+                                try:
+                                    u_f = float(u)
+                                    inst_str = f"[{int(u_f)}]" if u_f.is_integer() else f"[{u_f}]"
+                                except (ValueError, TypeError):
+                                    inst_str = f"[{u}]"
+                                parsed.estimated_rates[f"{tname}{inst_str}"] = rate
+                        else:
+                            parsed.estimated_rates[tname] = count / total_duration
+
+        # Compact mlog.offsets into numpy arrays to reduce memory footprint
+        for tid in range(len(mlog.offsets)):
+            if len(mlog.offsets[tid]) > 0 and not isinstance(mlog.offsets[tid], np.ndarray):
+                mlog.offsets[tid] = np.array(mlog.offsets[tid], dtype=np.uint64)
+
+        unpacked_types = set()
+
+        def unpack_target_type(target_type: str):
+            base_mtype = target_type.split('[')[0]
+            if base_mtype in unpacked_types:
+                return
+            unpacked_types.add(base_mtype)
+
+            dfs = parse_bin_log(filepath, [base_mtype], ignore_gps_clock=True, mlog=mlog)
+            if base_mtype not in dfs or dfs[base_mtype].empty:
+                return
+
+            df = dfs[base_mtype]
             time_col = None
             for c in ['TimeUS', 'time_us', 'TimeMS', 'Time']:
                 if c in df.columns:
@@ -103,9 +232,9 @@ class DataflashParser(BaseParser):
                     break
 
             inst_col = None
-            for c in ('C', 'I', 'Instance', 'instance', 'Inst', 'Core', 'Id', 'ID', 'Num'):
+            for c in INSTANCE_CANDIDATE_COLUMNS:
                 if c in df.columns and c != time_col:
-                    if is_valid_instance_column(mtype, c, df[c].to_numpy()):
+                    if is_valid_instance_column(base_mtype, c, df[c].to_numpy()):
                         inst_col = c
                         break
 
@@ -117,13 +246,10 @@ class DataflashParser(BaseParser):
                         continue
                     try:
                         val_float = float(inst_val)
-                        if val_float.is_integer():
-                            inst_str = f"[{int(val_float)}]"
-                        else:
-                            inst_str = f"[{val_float}]"
+                        inst_str = f"[{int(val_float)}]" if val_float.is_integer() else f"[{val_float}]"
                     except (ValueError, TypeError):
                         inst_str = f"[{inst_val}]"
-                    sub_mtype = f"{mtype}{inst_str}"
+                    sub_mtype = f"{base_mtype}{inst_str}"
 
                     if time_col:
                         t_arr = sub_df[time_col].to_numpy(dtype=np.float64)
@@ -134,12 +260,10 @@ class DataflashParser(BaseParser):
                     else:
                         t_arr = np.arange(len(sub_df), dtype=np.float64)
 
-                    if len(t_arr) > 0:
-                        last_timestamp = max(last_timestamp, t_arr[-1])
-
                     parsed.timestamps[sub_mtype] = t_arr
                     fields = [col for col in sub_df.columns if col != time_col]
-                    parsed.field_tree[sub_mtype] = fields
+                    if sub_mtype not in parsed.field_tree:
+                        parsed.field_tree[sub_mtype] = fields
 
                     for f in fields:
                         key = f"{sub_mtype}.{f}"
@@ -154,20 +278,91 @@ class DataflashParser(BaseParser):
                 else:
                     t_arr = np.arange(len(df), dtype=np.float64)
 
-                if len(t_arr) > 0:
-                    last_timestamp = max(last_timestamp, t_arr[-1])
-
-                parsed.timestamps[mtype] = t_arr
+                parsed.timestamps[base_mtype] = t_arr
                 fields = [col for col in df.columns if col != time_col]
-                parsed.field_tree[mtype] = fields
+                if base_mtype not in parsed.field_tree:
+                    parsed.field_tree[base_mtype] = fields
 
                 for f in fields:
-                    key = f"{mtype}.{f}"
+                    key = f"{base_mtype}.{f}"
                     parsed.time_series[key] = df[f].to_numpy()
 
-        # Update last flight mode end time if needed
-        if parsed.flight_modes:
-            parsed.flight_modes[-1].end_time = max(last_timestamp, parsed.flight_modes[-1].start_time + 1.0)
+        # Wire lazy dicts
+        parsed.time_series = LazyTimeSeriesDict(parsed, loader=unpack_target_type)
+        parsed.timestamps = LazyTimestampsDict(parsed, loader=unpack_target_type)
+
+        # Unpack key metadata types upfront (PARM, MSG, EV, MODE, STAT, GPS)
+        meta_types = [t for t in ['PARM', 'MSG', 'EV', 'MODE', 'STAT', 'GPS'] if t in mlog.name_to_id]
+        if meta_types:
+            dfs_meta = parse_bin_log(filepath, meta_types, ignore_gps_clock=True, mlog=mlog)
+
+            if 'PARM' in dfs_meta and not dfs_meta['PARM'].empty:
+                df_parm = dfs_meta['PARM']
+                for _, row in df_parm.iterrows():
+                    pname = _clean_str(row.get('Name', row.get('Param_Name', '')))
+                    pval = row.get('Value', row.get('Param_Value', 0.0))
+                    if pname:
+                        parsed.params[pname] = pval
+
+            if 'MSG' in dfs_meta and not dfs_meta['MSG'].empty:
+                df_msg = dfs_meta['MSG']
+                time_col = 'TimeUS' if 'TimeUS' in df_msg.columns else ('time_us' if 'time_us' in df_msg.columns else None)
+                for _, row in df_msg.iterrows():
+                    t = (row[time_col] / 1e6) if time_col and pd.notnull(row[time_col]) else 0.0
+                    txt = _clean_str(row.get('Message', row.get('Text', '')))
+                    parsed.text_messages.append({'time': t, 'text': txt})
+
+            if 'EV' in dfs_meta and not dfs_meta['EV'].empty:
+                df_ev = dfs_meta['EV']
+                time_col = 'TimeUS' if 'TimeUS' in df_ev.columns else ('time_us' if 'time_us' in df_ev.columns else None)
+                for _, row in df_ev.iterrows():
+                    t = (row[time_col] / 1e6) if time_col and pd.notnull(row[time_col]) else 0.0
+                    ev_id = _clean_str(row.get('Id', row.get('Event', '')))
+                    parsed.events.append(LogEvent(time=t, name=f"EV: {ev_id}", event_type="EVENT"))
+
+            if 'MODE' in dfs_meta and not dfs_meta['MODE'].empty:
+                df_mode = dfs_meta['MODE']
+                time_col = 'TimeUS' if 'TimeUS' in df_mode.columns else ('time_us' if 'time_us' in df_mode.columns else None)
+                flight_mode_events = []
+                for _, row in df_mode.iterrows():
+                    t = (row[time_col] / 1e6) if time_col and pd.notnull(row[time_col]) else 0.0
+                    m_str = _clean_str(row.get('Mode', row.get('ModeNum', 'UNKNOWN')))
+                    flight_mode_events.append((t, m_str))
+
+                for i in range(len(flight_mode_events)):
+                    t0, mode_raw = flight_mode_events[i]
+                    t1 = flight_mode_events[i + 1][0] if i + 1 < len(flight_mode_events) else max(end_timestamp, t0 + 1.0)
+                    mode_name, color = get_flight_mode_info(mode_raw)
+                    parsed.flight_modes.append(FlightModeSpan(name=mode_name, start_time=t0, end_time=t1, color=color))
+
+            # Populate metadata series into parsed (e.g. GPS, STAT)
+            for mtype in ['STAT', 'GPS']:
+                if mtype in dfs_meta and not dfs_meta[mtype].empty:
+                    df = dfs_meta[mtype]
+                    unpacked_types.add(mtype)
+                    time_col = 'TimeUS' if 'TimeUS' in df.columns else ('time_us' if 'time_us' in df.columns else None)
+                    t_arr = (df[time_col].to_numpy(dtype=np.float64) / 1e6) if time_col else np.arange(len(df), dtype=np.float64)
+                    
+                    inst_col = 'I' if 'I' in df.columns and is_valid_instance_column(mtype, 'I', df['I'].to_numpy()) else None
+                    if inst_col:
+                        for u_val in df[inst_col].unique():
+                            sub_df = df[df[inst_col] == u_val]
+                            try:
+                                u_f = float(u_val)
+                                inst_str = f"[{int(u_f)}]" if u_f.is_integer() else f"[{u_f}]"
+                            except Exception:
+                                inst_str = f"[{u_val}]"
+                            sub_mtype = f"{mtype}{inst_str}"
+                            sub_t = (sub_df[time_col].to_numpy(dtype=np.float64) / 1e6) if time_col else np.arange(len(sub_df), dtype=np.float64)
+                            parsed.timestamps[sub_mtype] = sub_t
+                            for col in sub_df.columns:
+                                if col != time_col:
+                                    parsed.time_series[f"{sub_mtype}.{col}"] = sub_df[col].to_numpy()
+                    else:
+                        parsed.timestamps[mtype] = t_arr
+                        for col in df.columns:
+                            if col != time_col:
+                                parsed.time_series[f"{mtype}.{col}"] = df[col].to_numpy()
 
         return parsed
 

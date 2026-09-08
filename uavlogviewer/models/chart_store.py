@@ -74,7 +74,7 @@ class ChartStore(QObject):
         super().__init__()
         self.sync_zoom: bool = False
         self.stats_full_range: bool = True
-        self.segment_filter: str = "longest"  # "longest" (default), "all", or "0", "1", "2"
+        self.segment_filter: str = "all"  # "all" (default), "longest", or "0", "1", "2"
         self.charts: List[ChartPanel] = [ChartPanel("Chart 1")]
 
     def set_segment_filter(self, mode: str):

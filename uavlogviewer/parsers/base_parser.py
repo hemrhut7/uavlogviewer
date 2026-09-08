@@ -138,6 +138,126 @@ class SegmentInfo:
     fs: float           # Estimated sampling rate (Hz)
     is_longest: bool = False
 
+class LazyTimeSeriesDict(dict):
+    """Dictionary that dynamically unpacks telemetry series from disk on-demand."""
+    def __init__(self, parsed_log: Optional['ParsedLog'] = None, loader=None):
+        super().__init__()
+        self.parsed_log = parsed_log
+        self.loader = loader
+        self._loading = False
+
+    def _trigger_load(self, key: str):
+        if not self.loader or self._loading:
+            return
+        mtype = key.split('.')[0] if '.' in key else key
+        base_mtype = mtype.split('[')[0]
+        self._loading = True
+        try:
+            self.loader(base_mtype)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Failed lazy-unpacking msg_type %s: %s", base_mtype, e, exc_info=True)
+        finally:
+            self._loading = False
+
+    def __getitem__(self, key: str) -> np.ndarray:
+        if not super().__contains__(key):
+            self._trigger_load(key)
+        return super().__getitem__(key)
+
+    def get(self, key: str, default=None):
+        if not super().__contains__(key):
+            self._trigger_load(key)
+        return super().get(key, default)
+
+    def __contains__(self, key: object) -> bool:
+        if super().__contains__(key):
+            return True
+        if isinstance(key, str) and self.parsed_log and self.parsed_log.field_tree:
+            if '.' in key:
+                mtype, f = key.split('.', 1)
+                base_mtype = mtype.split('[')[0]
+                if mtype in self.parsed_log.field_tree and f in self.parsed_log.field_tree[mtype]:
+                    return True
+                if base_mtype in self.parsed_log.field_tree and f in self.parsed_log.field_tree[base_mtype]:
+                    return True
+            elif "CALC" in self.parsed_log.field_tree and key in self.parsed_log.field_tree["CALC"]:
+                return True
+        return False
+
+    def __len__(self) -> int:
+        if not self.parsed_log or not self.parsed_log.field_tree:
+            return super().__len__()
+        count = sum(len(fields) for fields in self.parsed_log.field_tree.values())
+        return max(super().__len__(), count)
+
+    def __iter__(self):
+        return iter(self.keys())
+
+    def keys(self):
+        if not self.parsed_log or not self.parsed_log.field_tree:
+            return super().keys()
+        all_k = set(super().keys())
+        for mtype, fields in self.parsed_log.field_tree.items():
+            for f in fields:
+                all_k.add(f"{mtype}.{f}" if mtype != "CALC" else f)
+        return all_k
+
+
+class LazyTimestampsDict(dict):
+    """Dictionary that dynamically unpacks telemetry timestamps from disk on-demand."""
+    def __init__(self, parsed_log: Optional['ParsedLog'] = None, loader=None):
+        super().__init__()
+        self.parsed_log = parsed_log
+        self.loader = loader
+        self._loading = False
+
+    def _trigger_load(self, key: str):
+        if not self.loader or self._loading:
+            return
+        mtype = key.split('.')[0] if '.' in key else key
+        base_mtype = mtype.split('[')[0]
+        self._loading = True
+        try:
+            self.loader(base_mtype)
+        except Exception:
+            pass
+        finally:
+            self._loading = False
+
+    def __getitem__(self, key: str) -> np.ndarray:
+        if not super().__contains__(key):
+            self._trigger_load(key)
+        return super().__getitem__(key)
+
+    def get(self, key: str, default=None):
+        if not super().__contains__(key):
+            self._trigger_load(key)
+        return super().get(key, default)
+
+    def __contains__(self, key: object) -> bool:
+        if super().__contains__(key):
+            return True
+        if isinstance(key, str) and self.parsed_log and self.parsed_log.field_tree:
+            base_key = key.split('[')[0]
+            if key in self.parsed_log.field_tree or base_key in self.parsed_log.field_tree:
+                return True
+        return False
+
+    def __len__(self) -> int:
+        if not self.parsed_log or not self.parsed_log.field_tree:
+            return super().__len__()
+        return max(super().__len__(), len(self.parsed_log.field_tree))
+
+    def __iter__(self):
+        return iter(self.keys())
+
+    def keys(self):
+        if not self.parsed_log or not self.parsed_log.field_tree:
+            return super().keys()
+        return set(super().keys()) | set(self.parsed_log.field_tree.keys())
+
+
 @dataclass
 class ParsedLog:
     filename: str = ""
@@ -150,14 +270,24 @@ class ParsedLog:
     params: Dict[str, Any] = field(default_factory=dict)
     text_messages: List[Dict[str, Any]] = field(default_factory=list)
     field_tree: Dict[str, List[str]] = field(default_factory=dict)
+    estimated_rates: Dict[str, float] = field(default_factory=dict)
+    total_log_duration: float = 0.0
 
     def get_data_rate(self, msg_type: str) -> float:
-        t_arr = self.timestamps.get(msg_type)
+        if msg_type in self.estimated_rates:
+            return self.estimated_rates[msg_type]
+        clean_type = msg_type.split('.')[0]
+        if clean_type in self.estimated_rates:
+            return self.estimated_rates[clean_type]
+        base_mtype = clean_type.split('[')[0]
+        if base_mtype in self.estimated_rates:
+            return self.estimated_rates[base_mtype]
+        t_arr = self.timestamps.get(clean_type, self.timestamps.get(msg_type))
         return calculate_data_rate(t_arr)
 
     def get_segments(self, msg_type_or_field: str = "") -> List[SegmentInfo]:
         """Gets continuous segments for a given msg_type or field, or primary telemetry timestamps."""
-        if not self.timestamps:
+        if not self.timestamps and not self.field_tree:
             return []
         
         target_type = msg_type_or_field
@@ -168,8 +298,8 @@ class ParsedLog:
         else:
             primary_key = None
             candidates = (
-                "IMU[0]", "IMU", "ATT[0]", "ATT", "POS[0]", "POS", "BARO[0]", "BARO",
-                "ATTITUDE", "RAW_IMU", "HIGHRES_IMU", "GLOBAL_POSITION_INT", "VFR_HUD",
+                "ATT", "ATT[0]", "POS", "POS[0]", "GPS", "GPS[0]", "BARO", "BARO[0]", "IMU", "IMU[0]",
+                "CTUN", "NTUN", "STAT", "ATTITUDE", "RAW_IMU", "HIGHRES_IMU", "GLOBAL_POSITION_INT", "VFR_HUD",
                 "SERVO_OUTPUT_RAW", "GPS_RAW_INT", "SCALED_IMU", "SYS_STATUS"
             )
             for candidate in candidates:
