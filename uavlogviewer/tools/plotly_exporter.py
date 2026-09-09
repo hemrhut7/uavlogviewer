@@ -51,9 +51,10 @@ def filter_by_segment(t_arr: np.ndarray, y_arr: np.ndarray, parsed_log: ParsedLo
             target_seg = segs[idx]
 
     if target_seg:
-        mask = (t_arr >= target_seg.start_time) & (t_arr <= target_seg.end_time)
-        if np.count_nonzero(mask) > 0:
-            return t_arr[mask], y_arr[mask]
+        i0 = int(np.searchsorted(t_arr, target_seg.start_time, side='left'))
+        i1 = int(np.searchsorted(t_arr, target_seg.end_time, side='right'))
+        if i0 < i1:
+            return t_arr[i0:i1], y_arr[i0:i1]
         return t_arr, y_arr
 
     return t_arr, y_arr
@@ -202,10 +203,13 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                     # 1. Filter top XY Scatter plot by visible_range if specified
                     if visible_range and len(visible_range) == 2 and visible_range[0] is not None and visible_range[1] is not None:
                         x0, x1 = visible_range
-                        mask_x = (x_t_arr >= x0) & (x_t_arr <= x1)
-                        mask_y = (y_t_arr >= x0) & (y_t_arr <= x1)
-                        x_t_sub, x_y_sub = x_t_arr[mask_x], x_y_arr[mask_x]
-                        y_t_sub, y_y_sub = y_t_arr[mask_y], y_y_arr[mask_y]
+                        i_x0 = int(np.searchsorted(x_t_arr, x0, side='left'))
+                        i_x1 = int(np.searchsorted(x_t_arr, x1, side='right'))
+                        x_t_sub, x_y_sub = x_t_arr[i_x0:i_x1], x_y_arr[i_x0:i_x1]
+
+                        i_y0 = int(np.searchsorted(y_t_arr, x0, side='left'))
+                        i_y1 = int(np.searchsorted(y_t_arr, x1, side='right'))
+                        y_t_sub, y_y_sub = y_t_arr[i_y0:i_y1], y_y_arr[i_y0:i_y1]
                     else:
                         x_t_sub, x_y_sub = x_t_arr, x_y_arr
                         y_t_sub, y_y_sub = y_t_arr, y_y_arr
@@ -327,6 +331,7 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                 # Downsample if max_points > 0 and len > max_points (0 for Unlimited / full resolution)
                 max_pts = getattr(chart, 'max_points', 10000)
                 step_ts = max(1, math.ceil(len(t_arr) / max_pts)) if (max_pts > 0 and len(t_arr) > max_pts) else 1
+                is_dense = (max_pts == 0 or len(t_arr) > 25000)
 
                 fig.add_trace(
                     go.Scattergl(
@@ -334,8 +339,9 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                         y=y_arr[::step_ts],
                         mode='lines',
                         name=field_key,
-                        line=dict(color=expr.color, width=2),
-                        hovertemplate=f"<b>{field_key}</b><br>Time: %{{x:.2f}}s<br>Val: %{{y}}<extra></extra>"
+                        line=dict(color=expr.color, width=1 if is_dense else 2),
+                        hoverinfo='none' if is_dense else 'all',
+                        hovertemplate=None if is_dense else f"<b>{field_key}</b><br>Time: %{{x:.2f}}s<br>Val: %{{y}}<extra></extra>"
                     ),
                     row=r_ts,
                     col=1,
@@ -388,12 +394,13 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                     )
 
     has_scatter = any(c.chart_type == "scatter" for c in active_charts)
+    has_unlimited_or_large = any(getattr(c, 'max_points', 10000) == 0 or getattr(c, 'max_points', 10000) > 25000 for c in active_charts)
 
     fig.update_layout(
         template="plotly_white",
         paper_bgcolor="#fafafa",
         plot_bgcolor="#ffffff",
-        hovermode="closest" if has_scatter else "x unified",
+        hovermode=False if has_unlimited_or_large else ("closest" if has_scatter else "x unified"),
         autosize=True,
         margin=dict(l=50, r=50, t=30, b=40),
         legend=dict(
@@ -432,42 +439,58 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
     time_axis_ids_json = json.dumps(time_axis_ids)
 
     # Inject JavaScript listener to communicate visible X-axis time range to Python via document.title (strictly for time-series X-axes)
+    # Includes 150ms debounce timer to eliminate IPC event flooding during rapid mouse wheel zoom/pan
     js_listener = f"""
     <script>
     window.addEventListener('DOMContentLoaded', function() {{
         var validTimeAxes = {time_axis_ids_json};
+        var relayoutTimer = null;
         var checkPlot = setInterval(function() {{
             var gd = document.getElementsByClassName('plotly-graph-div')[0];
             if (gd && gd.on) {{
                 clearInterval(checkPlot);
+                // Ensure all WebGL subplots immediately resize and render on load
+                setTimeout(function() {{
+                    if (window.Plotly && gd) {{ Plotly.Plots.resize(gd); }}
+                }}, 50);
+                setTimeout(function() {{
+                    if (window.Plotly && gd) {{ Plotly.Plots.resize(gd); }}
+                }}, 250);
+                window.addEventListener('resize', function() {{
+                    if (window.Plotly && gd) {{ Plotly.Plots.resize(gd); }}
+                }});
+
                 gd.on('plotly_relayout', function(eventdata) {{
-                    var x0 = null, x1 = null;
-                    for (var key in eventdata) {{
-                        var axisPrefix = key.split('.')[0].split('[')[0];
-                        if (validTimeAxes.indexOf(axisPrefix) !== -1) {{
-                            if (key.indexOf('[0]') !== -1) {{
-                                var baseKey = key.split('[0]')[0];
-                                x0 = eventdata[baseKey + '[0]'];
-                                x1 = eventdata[baseKey + '[1]'];
-                                break;
-                            }} else if (Array.isArray(eventdata[key]) && eventdata[key].length === 2) {{
-                                x0 = eventdata[key][0];
-                                x1 = eventdata[key][1];
-                                break;
+                    clearTimeout(relayoutTimer);
+                    relayoutTimer = setTimeout(function() {{
+                        var x0 = null, x1 = null;
+                        for (var key in eventdata) {{
+                            var axisPrefix = key.split('.')[0].split('[')[0];
+                            if (validTimeAxes.indexOf(axisPrefix) !== -1) {{
+                                if (key.indexOf('[0]') !== -1) {{
+                                    var baseKey = key.split('[0]')[0];
+                                    x0 = eventdata[baseKey + '[0]'];
+                                    x1 = eventdata[baseKey + '[1]'];
+                                    break;
+                                }} else if (Array.isArray(eventdata[key]) && eventdata[key].length === 2) {{
+                                    x0 = eventdata[key][0];
+                                    x1 = eventdata[key][1];
+                                    break;
+                                }}
                             }}
                         }}
-                    }}
-                    if (x0 !== null && x1 !== null) {{
-                        document.title = "RANGE:" + x0 + ":" + x1;
-                    }} else {{
-                        for (var k in eventdata) {{
-                            var aPrefix = k.split('.')[0].split('[')[0];
-                            if (validTimeAxes.indexOf(aPrefix) !== -1 && k.indexOf('autorange') !== -1) {{
-                                document.title = "RANGE:RESET";
-                                break;
+                        if (x0 !== null && x1 !== null) {{
+                            document.title = "RANGE:" + x0 + ":" + x1;
+                        }} else {{
+                            for (var k in eventdata) {{
+                                var aPrefix = k.split('.')[0].split('[')[0];
+                                if (validTimeAxes.indexOf(aPrefix) !== -1 && k.indexOf('autorange') !== -1) {{
+                                    document.title = "RANGE:RESET";
+                                    break;
+                                }}
                             }}
                         }}
-                    }}
+                    }}, 150);
                 }});
                 gd.on('plotly_click', function(data) {{
                     if (data && data.points && data.points.length > 0) {{

@@ -45,6 +45,28 @@ class TestChartMaxPoints(unittest.TestCase):
         html = generate_plotly_html(self.log, self.chart_store)
         self.assertIn("ATT.Roll", html)
         self.assertTrue(len(html) > 0)
+        # When unlimited points or large dataset, hovermode should be disabled (false) to prevent event queue starvation
+        self.assertIn('"hovermode":false', html.replace(' ', ''))
+        # Verify debounce timer is present in JS
+        self.assertIn("relayoutTimer", html)
+        self.assertIn("setTimeout", html)
+
+    def test_scatter_visible_range_filtering(self):
+        # Create XY Scatter chart
+        cs = ChartStore()
+        cs.add_xy_chart("ATT.Pitch", "ATT.Roll")
+        self.log.time_series["ATT.Pitch"] = np.cos(self.log.timestamps["ATT"])
+        self.log.field_tree["ATT"].append("Pitch")
+
+        # Full range
+        html_full = generate_plotly_html(self.log, cs, visible_range=None)
+        self.assertIn("XY Scatter", html_full)
+
+        # Filtered range: 10s ~ 20s
+        html_filtered = generate_plotly_html(self.log, cs, visible_range=(10.0, 20.0))
+        self.assertIn("XY Scatter", html_filtered)
+        # Verify range is preserved on timeline
+        self.assertIn('"range":[10.0,20.0]', html_filtered.replace(' ', ''))
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,10 +6,17 @@ Usage:
 """
 import sys
 import os
+
+# Enable GPU acceleration flags for QtWebEngine before QApplication starts
+os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS",
+                      "--enable-gpu-rasterization --ignore-gpu-blocklist --enable-zero-copy")
+
+from PySide6.QtCore import Qt, QCoreApplication
 from PySide6.QtWidgets import QApplication
 from uavlogviewer.gui.main_window import MainWindow
 
 def main():
+    QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
     app = QApplication(sys.argv)
     app.setApplicationName("UAV Log Viewer")
     

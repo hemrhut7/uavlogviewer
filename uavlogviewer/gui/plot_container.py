@@ -8,7 +8,7 @@ Dependencies: PySide6, numpy, chart_store, plotly_exporter, QtWebEngineWidgets.
 import os
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
                                QTableWidgetItem, QHeaderView, QGroupBox, QFileDialog)
-from PySide6.QtCore import QUrl, Qt, Signal
+from PySide6.QtCore import QUrl, Qt, Signal, QTimer
 from PySide6.QtGui import QPalette, QColor
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEngineDownloadRequest
@@ -32,6 +32,7 @@ class PlotContainer(QWidget):
         self.plotly_web_view = QWebEngineView()
         self.plotly_web_view.page().profile().downloadRequested.connect(self.on_download_requested)
         self.plotly_web_view.titleChanged.connect(self.on_web_title_changed)
+        self.plotly_web_view.loadFinished.connect(self.on_web_load_finished)
         self.layout.addWidget(self.plotly_web_view, stretch=4)
 
         # Structured Viewport Statistics Box & Table Widget
@@ -68,6 +69,11 @@ class PlotContainer(QWidget):
 
         self.parsed_log: Optional[ParsedLog] = None
         self.current_visible_range: Optional[tuple] = None
+
+        self._scatter_reload_timer = QTimer(self)
+        self._scatter_reload_timer.setSingleShot(True)
+        self._scatter_reload_timer.setInterval(250)
+        self._scatter_reload_timer.timeout.connect(self.update_embedded_plotly)
 
         self.chart_store.updated.connect(self.update_plots)
 
@@ -128,6 +134,14 @@ class PlotContainer(QWidget):
         else:
             download_item.cancel()
 
+    def on_web_load_finished(self, ok: bool):
+        if ok:
+            # Force Plotly WebGL to calculate all subplot viewports and render immediately on load
+            self.plotly_web_view.page().runJavaScript(
+                "var gd = document.getElementsByClassName('plotly-graph-div')[0];"
+                "if (gd && window.Plotly) { Plotly.Plots.resize(gd); }"
+            )
+
     def on_web_title_changed(self, title: str):
         if not title:
             return
@@ -152,14 +166,14 @@ class PlotContainer(QWidget):
                 self.current_visible_range = (x0, x1)
                 self.update_stats_for_range(x0, x1)
                 if has_scatter:
-                    self.update_embedded_plotly()
+                    self._scatter_reload_timer.start()
             except ValueError:
                 pass
         elif "RESET" in title:
             self.current_visible_range = None
             self.update_stats_for_range(None, None)
             if has_scatter:
-                self.update_embedded_plotly()
+                self._scatter_reload_timer.start()
 
     def update_stats_for_range(self, x0: Optional[float] = None, x1: Optional[float] = None):
         if not self.parsed_log:
@@ -185,9 +199,10 @@ class PlotContainer(QWidget):
                 t_arr, y_arr = filter_by_segment(t_arr, y_arr, self.parsed_log, self.chart_store.segment_filter)
 
                 if x0 is not None and x1 is not None and len(t_arr) > 0:
-                    mask = (t_arr >= x0) & (t_arr <= x1)
-                    if np.any(mask):
-                        y_sub = y_arr[mask]
+                    i0 = int(np.searchsorted(t_arr, x0, side='left'))
+                    i1 = int(np.searchsorted(t_arr, x1, side='right'))
+                    if i0 < i1:
+                        y_sub = y_arr[i0:i1]
                         ymin, ymax = float(np.nanmin(y_sub)), float(np.nanmax(y_sub))
                         ymean = float(np.nanmean(y_sub))
                         ystd = float(np.nanstd(y_sub))
@@ -210,9 +225,17 @@ class PlotContainer(QWidget):
                     f"{ylast:.4f}"
                 ))
 
-        self.stats_table.setRowCount(len(table_rows))
-        for row_idx, row_data in enumerate(table_rows):
-            for col_idx, text in enumerate(row_data):
-                item = QTableWidgetItem(text)
-                item.setTextAlignment(Qt.AlignCenter)
-                self.stats_table.setItem(row_idx, col_idx, item)
+        self.stats_table.setUpdatesEnabled(False)
+        try:
+            self.stats_table.setRowCount(len(table_rows))
+            for row_idx, row_data in enumerate(table_rows):
+                for col_idx, text in enumerate(row_data):
+                    existing = self.stats_table.item(row_idx, col_idx)
+                    if existing is not None:
+                        existing.setText(text)
+                    else:
+                        item = QTableWidgetItem(text)
+                        item.setTextAlignment(Qt.AlignCenter)
+                        self.stats_table.setItem(row_idx, col_idx, item)
+        finally:
+            self.stats_table.setUpdatesEnabled(True)
