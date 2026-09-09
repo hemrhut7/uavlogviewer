@@ -62,6 +62,26 @@ class TestLazyLoader(unittest.TestCase):
         with self.assertRaises(KeyError):
             _ = parsed.time_series["NON_EXISTENT.Field"]
 
+        # Non-string keys should return default without TypeError
+        self.assertIsNone(parsed.time_series.get(None))
+        self.assertIsNone(parsed.timestamps.get(None))
+        self.assertNotIn(None, parsed.time_series)
+        self.assertNotIn(None, parsed.timestamps)
+
+    def test_calc_channel_consistency(self):
+        parsed = ParsedLog(filename="test.bin")
+        parsed.field_tree = {
+            "CALC": ["diff_roll"],
+        }
+        parsed.time_series = LazyTimeSeriesDict(parsed)
+        parsed.timestamps = LazyTimestampsDict(parsed)
+        parsed.time_series["CALC.diff_roll"] = np.array([10.0, 20.0])
+
+        self.assertIn("CALC.diff_roll", parsed.time_series)
+        self.assertNotIn("diff_roll", parsed.time_series)
+        self.assertIn("CALC.diff_roll", list(parsed.time_series.keys()))
+        self.assertNotIn("diff_roll", list(parsed.time_series.keys()))
+
     def test_estimated_rates_and_lookup(self):
         parsed = ParsedLog(filename="test.bin")
         parsed.estimated_rates = {

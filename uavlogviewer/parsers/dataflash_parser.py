@@ -212,6 +212,12 @@ class DataflashParser(BaseParser):
             if len(mlog.offsets[tid]) > 0 and not isinstance(mlog.offsets[tid], np.ndarray):
                 mlog.offsets[tid] = np.array(mlog.offsets[tid], dtype=np.uint64)
 
+        if hasattr(mlog, 'close'):
+            try:
+                mlog.close()
+            except Exception:
+                pass
+
         unpacked_types = set()
 
         def unpack_target_type(target_type: str):

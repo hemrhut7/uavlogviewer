@@ -144,21 +144,23 @@ class LazyTimeSeriesDict(dict):
         super().__init__()
         self.parsed_log = parsed_log
         self.loader = loader
-        self._loading = False
+        self._loading_types: set[str] = set()
 
     def _trigger_load(self, key: str):
-        if not self.loader or self._loading:
+        if not self.loader or not isinstance(key, str):
             return
         mtype = key.split('.')[0] if '.' in key else key
         base_mtype = mtype.split('[')[0]
-        self._loading = True
+        if base_mtype in self._loading_types:
+            return
+        self._loading_types.add(base_mtype)
         try:
             self.loader(base_mtype)
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning("Failed lazy-unpacking msg_type %s: %s", base_mtype, e, exc_info=True)
         finally:
-            self._loading = False
+            self._loading_types.discard(base_mtype)
 
     def __getitem__(self, key: str) -> np.ndarray:
         if not super().__contains__(key):
@@ -181,8 +183,6 @@ class LazyTimeSeriesDict(dict):
                     return True
                 if base_mtype in self.parsed_log.field_tree and f in self.parsed_log.field_tree[base_mtype]:
                     return True
-            elif "CALC" in self.parsed_log.field_tree and key in self.parsed_log.field_tree["CALC"]:
-                return True
         return False
 
     def __len__(self) -> int:
@@ -200,7 +200,7 @@ class LazyTimeSeriesDict(dict):
         all_k = set(super().keys())
         for mtype, fields in self.parsed_log.field_tree.items():
             for f in fields:
-                all_k.add(f"{mtype}.{f}" if mtype != "CALC" else f)
+                all_k.add(f"{mtype}.{f}")
         return all_k
 
 
@@ -210,20 +210,22 @@ class LazyTimestampsDict(dict):
         super().__init__()
         self.parsed_log = parsed_log
         self.loader = loader
-        self._loading = False
+        self._loading_types: set[str] = set()
 
     def _trigger_load(self, key: str):
-        if not self.loader or self._loading:
+        if not self.loader or not isinstance(key, str):
             return
         mtype = key.split('.')[0] if '.' in key else key
         base_mtype = mtype.split('[')[0]
-        self._loading = True
+        if base_mtype in self._loading_types:
+            return
+        self._loading_types.add(base_mtype)
         try:
             self.loader(base_mtype)
         except Exception:
             pass
         finally:
-            self._loading = False
+            self._loading_types.discard(base_mtype)
 
     def __getitem__(self, key: str) -> np.ndarray:
         if not super().__contains__(key):

@@ -72,10 +72,7 @@ class ExpressionEditorDialog(QDialog):
 
         try:
             res = eval(processed_expr, {"__builtins__": {}}, eval_dict)
-            if not isinstance(res, np.ndarray):
-                ref_arr = eval_dict[next(iter(var_map.values()))] if var_map else next(iter(self.parsed_log.time_series.values()))
-                res = np.full_like(ref_arr, float(res))
-            
+
             # Determine primary timestamps from the first input variable used
             primary_timestamps = None
             for key in matching_keys:
@@ -84,7 +81,23 @@ class ExpressionEditorDialog(QDialog):
                     primary_timestamps = self.parsed_log.timestamps[mtype]
                     break
             if primary_timestamps is None:
-                primary_timestamps = next(iter(self.parsed_log.timestamps.values()), np.array([]))
+                for cand in ["ATT", "POS", "GPS", "BARO", "IMU"]:
+                    if cand in self.parsed_log.timestamps:
+                        primary_timestamps = self.parsed_log.timestamps[cand]
+                        break
+            if primary_timestamps is None and len(self.parsed_log.timestamps) > 0:
+                try:
+                    primary_timestamps = next(iter(self.parsed_log.timestamps.values()))
+                except StopIteration:
+                    primary_timestamps = np.array([])
+            if primary_timestamps is None:
+                primary_timestamps = np.array([])
+
+            if not isinstance(res, np.ndarray):
+                ref_len = len(primary_timestamps) if len(primary_timestamps) > 0 else 1
+                res = np.full(ref_len, float(res), dtype=np.float64)
+                if len(primary_timestamps) == 0:
+                    primary_timestamps = np.arange(ref_len, dtype=np.float64)
 
             # Store calculated series in parsed_log
             msg_group = channel_name.split('.')[0] if '.' in channel_name else "CALC"

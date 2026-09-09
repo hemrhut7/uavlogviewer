@@ -6,6 +6,7 @@ clean empty annotation text on multi-row subplots, generous vertical spacing, an
 Dependencies: plotly, numpy, chart_store.
 """
 import json
+import math
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -225,7 +226,7 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
 
                         max_pts = getattr(chart, 'max_points', 5000)
                         if max_pts > 0 and len(final_x) > max_pts:
-                            step = max(1, len(final_x) // max_pts)
+                            step = max(1, math.ceil(len(final_x) / max_pts))
                             scat_x, scat_y, scat_t = final_x[::step], final_y[::step], final_t[::step]
                         else:
                             scat_x, scat_y, scat_t = final_x, final_y, final_t
@@ -325,7 +326,7 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
 
                 # Downsample if max_points > 0 and len > max_points (0 for Unlimited / full resolution)
                 max_pts = getattr(chart, 'max_points', 10000)
-                step_ts = max(1, len(t_arr) // max_pts) if (max_pts > 0 and len(t_arr) > max_pts) else 1
+                step_ts = max(1, math.ceil(len(t_arr) / max_pts)) if (max_pts > 0 and len(t_arr) > max_pts) else 1
 
                 fig.add_trace(
                     go.Scattergl(
