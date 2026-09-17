@@ -16,7 +16,7 @@ from uavlogviewer.models.chart_store import ChartStore
 from uavlogviewer.parsers.base_parser import ParsedLog
 from uavlogviewer.parsers.dataflash_parser import DataflashParser
 from uavlogviewer.parsers.mavlink_parser import MavlinkParser
-from uavlogviewer.parsers.dji_parser import DjiParser
+from uavlogviewer.parsers.csv_parser import CsvParser
 from uavlogviewer.widgets.param_viewer import ParamViewerDialog
 from uavlogviewer.widgets.message_viewer import MessageViewerDialog
 from uavlogviewer.widgets.expression_editor import ExpressionEditorDialog
@@ -96,8 +96,8 @@ class LogParseWorker(QThread):
                 parser = DataflashParser()
             elif ext == '.tlog':
                 parser = MavlinkParser()
-            elif ext in ['.txt', '.csv']:
-                parser = DjiParser()
+            elif ext in ('.csv', '.txt'):
+                parser = CsvParser()
             else:
                 parser = DataflashParser()
 

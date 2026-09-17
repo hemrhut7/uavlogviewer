@@ -131,7 +131,7 @@ class SidebarWidget(QWidget):
         drop_box = QGroupBox("Log File Target")
         drop_layout = QVBoxLayout(drop_box)
         
-        drop_lbl = QLabel("Drag & drop .bin / .BIN / .tlog / .txt files here\nor click below to browse.")
+        drop_lbl = QLabel("Drag & drop .bin / .BIN / .tlog / .txt / .csv files here\nor click below to browse.")
         drop_lbl.setAlignment(Qt.AlignCenter)
         drop_lbl.setStyleSheet("color: #737373; padding: 24px; border: 2px dashed #e5e5e5; border-radius: 8px; background: #fafafa;")
         drop_layout.addWidget(drop_lbl)
@@ -374,6 +374,7 @@ class SidebarWidget(QWidget):
             "Open UAV Log File",
             "",
             "UAV Logs (*.bin *.BIN *.log *.LOG *.tlog *.TLOG *.txt *.TXT *.csv *.CSV);;"
+            "CSV Logs (*.csv *.CSV);;"
             "DataFlash Logs (*.bin *.BIN *.log *.LOG);;"
             "MAVLink Logs (*.tlog *.TLOG);;"
             "DJI Logs (*.txt *.TXT *.csv *.CSV);;"
