@@ -213,6 +213,13 @@ class ChartStore(QObject):
                     pair.y_field = field_name
                 self.updated.emit()
 
+    def set_xy_pair_color(self, chart_idx: int, pair_idx: int, color: str):
+        if 0 <= chart_idx < len(self.charts):
+            chart = self.charts[chart_idx]
+            if chart.chart_type == "scatter" and 0 <= pair_idx < len(chart.pairs):
+                chart.pairs[pair_idx].color = color
+                self.updated.emit()
+
     def has_any_expressions(self) -> bool:
         return any(
             (c.chart_type == "timeseries" and len(c.expressions) > 0) or

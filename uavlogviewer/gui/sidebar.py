@@ -995,6 +995,14 @@ class SidebarWidget(QWidget):
                     xy_layout.addWidget(vs_lbl)
                     xy_layout.addWidget(btn_y, stretch=1)
 
+                    btn_color = QPushButton("■")
+                    btn_color.setToolTip("Adjust XY scatter data color")
+                    btn_color.setStyleSheet(f"color: {pair.color}; background: #fafafa; border: 1px solid #fed7aa; font-size: 14px; font-weight: bold; border-radius: 4px; padding: 2px 6px;")
+                    btn_color.clicked.connect(
+                        lambda _, c=c_idx, p=p_idx, cur_col=pair.color: self.pick_xy_pair_color(c, p, cur_col)
+                    )
+                    xy_layout.addWidget(btn_color)
+
                     if len(chart.pairs) > 1:
                         btn_rm_pair = QPushButton("❌")
                         btn_rm_pair.setStyleSheet("background: transparent; color: #ef4444; border: none; font-weight: bold; padding: 0 4px;")
@@ -1285,3 +1293,8 @@ class SidebarWidget(QWidget):
         color = QColorDialog.getColor(QColor(current_color), self, f"Select Color for {expr_name}")
         if color.isValid():
             self.chart_store.set_expression_color(chart_idx, expr_name, color.name())
+
+    def pick_xy_pair_color(self, chart_idx: int, pair_idx: int, current_color: str):
+        color = QColorDialog.getColor(QColor(current_color), self, "Select XY Scatter Color")
+        if color.isValid():
+            self.chart_store.set_xy_pair_color(chart_idx, pair_idx, color.name())
