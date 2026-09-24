@@ -89,6 +89,7 @@ class SidebarWidget(QWidget):
     open_expression_requested = Signal()
     open_coord_transform_requested = Signal()
     open_coord_transform_for_chart_requested = Signal(int)
+    open_export_csv_requested = Signal()
 
     def __init__(self, chart_store: ChartStore, parent=None):
         super().__init__(parent)
@@ -291,6 +292,12 @@ class SidebarWidget(QWidget):
         self.btn_add_xy.clicked.connect(self.on_add_xy_clicked)
         global_btns_layout.addWidget(self.btn_add_xy)
 
+        self.btn_export_csv = QPushButton("💾 Export CSV")
+        self.btn_export_csv.setStyleSheet("background-color: #2563eb; color: #ffffff; font-weight: bold; border-radius: 4px; padding: 4px 10px;")
+        self.btn_export_csv.setToolTip("將繪圖區中所有 Message 匯出為 .csv 檔案")
+        self.btn_export_csv.clicked.connect(self.open_export_csv_requested.emit)
+        global_btns_layout.addWidget(self.btn_export_csv)
+
         chk_style = """
         QCheckBox {
             color: #171717;
@@ -360,6 +367,11 @@ class SidebarWidget(QWidget):
         self.btn_coord.setStyleSheet("background: #f5f5f5; color: #171717; border: 1px solid #e5e5e5; padding: 6px; border-radius: 4px;")
         self.btn_coord.clicked.connect(self.open_coord_transform_requested.emit)
         t_layout.addWidget(self.btn_coord)
+
+        self.btn_export_tool = QPushButton("💾 匯出繪圖區訊息至 CSV (Export Plotted to CSV)")
+        self.btn_export_tool.setStyleSheet("background: #f5f5f5; color: #171717; border: 1px solid #e5e5e5; padding: 6px; border-radius: 4px;")
+        self.btn_export_tool.clicked.connect(self.open_export_csv_requested.emit)
+        t_layout.addWidget(self.btn_export_tool)
 
         other_layout.addWidget(tools_box)
         other_layout.addStretch()

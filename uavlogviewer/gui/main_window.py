@@ -21,6 +21,7 @@ from uavlogviewer.widgets.param_viewer import ParamViewerDialog
 from uavlogviewer.widgets.message_viewer import MessageViewerDialog
 from uavlogviewer.widgets.expression_editor import ExpressionEditorDialog
 from uavlogviewer.widgets.coord_transform_dialog import CoordTransformDialog
+from uavlogviewer.widgets.export_csv_dialog import ExportCsvDialog
 
 MAIN_WINDOW_STYLE = """
 QMainWindow { background-color: #fafafa; color: #171717; }
@@ -135,11 +136,13 @@ class MainWindow(QMainWindow):
         self.sidebar.open_expression_requested.connect(self.open_expression_editor)
         self.sidebar.open_coord_transform_requested.connect(self.open_coord_transform)
         self.sidebar.open_coord_transform_for_chart_requested.connect(self.open_coord_transform_for_chart)
+        self.sidebar.open_export_csv_requested.connect(self.open_export_csv_dialog)
         self.splitter.addWidget(self.sidebar)
 
         # Right Main Plot Container
         self.plot_container = PlotContainer(self.chart_store)
         self.plot_container.point_alt_clicked.connect(self.on_chart_alt_clicked)
+        self.plot_container.open_export_csv_requested.connect(self.open_export_csv_dialog)
         self.splitter.addWidget(self.plot_container)
 
         self.splitter.setSizes([380, 1000])
@@ -262,3 +265,30 @@ class MainWindow(QMainWindow):
         self.sidebar.populate_field_tree(self.parsed_log)
         self.plot_container.update_plots()
         self.status_bar.showMessage(f"Coordinates transformed to ENU: {res_e}, {res_n}, {res_u}")
+
+    def open_export_csv_dialog(self):
+        if not self.parsed_log:
+            QMessageBox.information(self, "No Log Loaded", "Please load a log file first.")
+            return
+        if not self.chart_store.has_any_expressions():
+            QMessageBox.information(
+                self,
+                "No Plotted Messages",
+                "繪圖區目前沒有繪製任何訊息或欄位。\n請先在左側欄雙擊欄位加入繪圖區。"
+            )
+            return
+
+        dialog = ExportCsvDialog(
+            parsed_log=self.parsed_log,
+            chart_store=self.chart_store,
+            visible_range=self.plot_container.current_visible_range,
+            parent=self
+        )
+        dialog.export_completed.connect(self.on_csv_exported)
+        dialog.exec_()
+
+    @Slot(str, int)
+    def on_csv_exported(self, filepath: str, row_count: int):
+        self.status_bar.showMessage(
+            f"繪圖區訊息已成功匯出至 CSV: {os.path.basename(filepath)} ({row_count} 列)"
+        )

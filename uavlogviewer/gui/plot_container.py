@@ -7,7 +7,7 @@ Dependencies: PySide6, numpy, chart_store, plotly_exporter, QtWebEngineWidgets.
 """
 import os
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
-                               QTableWidgetItem, QHeaderView, QGroupBox, QFileDialog)
+                               QTableWidgetItem, QHeaderView, QGroupBox, QFileDialog, QPushButton)
 from PySide6.QtCore import QUrl, Qt, Signal
 from PySide6.QtGui import QPalette, QColor
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -17,9 +17,11 @@ from typing import Optional, List
 from uavlogviewer.parsers.base_parser import ParsedLog
 from uavlogviewer.models.chart_store import ChartStore
 from uavlogviewer.tools.plotly_exporter import generate_plotly_html, filter_by_segment, get_series_data_and_timestamps
+from uavlogviewer.widgets.export_csv_dialog import ExportCsvDialog
 
 class PlotContainer(QWidget):
     point_alt_clicked = Signal(float)
+    open_export_csv_requested = Signal()
 
     def __init__(self, chart_store: ChartStore, parent=None):
         super().__init__(parent)
@@ -42,6 +44,36 @@ class PlotContainer(QWidget):
         """)
         stats_box_layout = QVBoxLayout(self.stats_box)
         stats_box_layout.setContentsMargins(4, 4, 4, 4)
+
+        # Header bar with Export CSV action
+        stats_header_layout = QHBoxLayout()
+        stats_header_layout.setContentsMargins(2, 0, 2, 2)
+
+        self.lbl_stats_info = QLabel("可視範圍統計 (Viewport Stats)")
+        self.lbl_stats_info.setStyleSheet("color: #737373; font-size: 11px;")
+        stats_header_layout.addWidget(self.lbl_stats_info)
+        stats_header_layout.addStretch()
+
+        self.btn_export_csv = QPushButton("💾 匯出繪圖區 CSV (Export CSV)")
+        self.btn_export_csv.setToolTip("將繪圖區中目前顯示的所有 Message / 數據欄位儲存為 .csv 檔案")
+        self.btn_export_csv.setStyleSheet("""
+            QPushButton {
+                background-color: #0d9488;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 3px 10px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #0f766e;
+            }
+        """)
+        self.btn_export_csv.clicked.connect(self.on_export_csv_clicked)
+        stats_header_layout.addWidget(self.btn_export_csv)
+
+        stats_box_layout.addLayout(stats_header_layout)
 
         self.stats_table = QTableWidget(0, 7)
         self.stats_table.setHorizontalHeaderLabels(["Chart", "Telemetry Field", "Min", "Max", "Mean", "STD", "Last Value"])
@@ -127,6 +159,20 @@ class PlotContainer(QWidget):
             download_item.accept()
         else:
             download_item.cancel()
+
+    def on_export_csv_clicked(self):
+        if not self.parsed_log:
+            return
+        if self.receivers(self.open_export_csv_requested) > 0:
+            self.open_export_csv_requested.emit()
+        else:
+            dialog = ExportCsvDialog(
+                parsed_log=self.parsed_log,
+                chart_store=self.chart_store,
+                visible_range=self.current_visible_range,
+                parent=self
+            )
+            dialog.exec_()
 
     def on_web_title_changed(self, title: str):
         if not title:
