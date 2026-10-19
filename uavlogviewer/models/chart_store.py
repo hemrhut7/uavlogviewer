@@ -16,7 +16,7 @@ class CalcBuilderState:
     def __init__(self):
         self.active_operand: str = 'A'  # 'A', 'B', etc.
         self.operand_a: str = ''
-        self.operator: str = '+'        # '+', '-', '*', '/', 'norm', 'wrap_180', 'wrap_360', 'rad2deg', 'deg2rad', 'ang_sub'
+        self.operator: str = '+'        # '+', '-', '*', '/', 'norm', 'vibe_mag', 'wrap_180', 'wrap_360', 'rad2deg', 'deg2rad', 'vibe', 'ang_sub'
         self.operand_b: str = ''
         self.norm_operands: List[str] = []
         self.active_norm_idx: int = 0
