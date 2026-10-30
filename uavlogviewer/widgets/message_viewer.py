@@ -24,6 +24,7 @@ from PySide6.QtGui import QPalette, QColor
 MESSAGE_VIEWER_STYLE = """
     QDialog {
         background-color: #fafafa;
+        color: #171717;
     }
     QLabel {
         color: #0d9488;
@@ -65,7 +66,7 @@ MESSAGE_VIEWER_STYLE = """
 class MessageViewerDialog(QDialog):
     def __init__(self, text_messages: List[Dict[str, Any]], parent=None):
         super().__init__(parent)
-        self.setWindowTitle("💬 Text Message Log Console")
+        self.setWindowTitle("Text Message Log Console")
         self.resize(750, 520)
         self.setStyleSheet(MESSAGE_VIEWER_STYLE)
         self.messages = text_messages
@@ -75,7 +76,7 @@ class MessageViewerDialog(QDialog):
         layout.setSpacing(10)
 
         top_bar = QHBoxLayout()
-        top_bar.addWidget(QLabel("🔍 Filter Messages:"))
+        top_bar.addWidget(QLabel("Filter Messages:"))
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Filter message text...")
         self.search_input.textChanged.connect(self.filter_messages)

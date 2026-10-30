@@ -96,7 +96,7 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
         <html>
         <body style='background-color:#fafafa; color:#525252; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align:center; padding-top:100px;'>
             <div style='border: 1px solid #e5e5e5; display: inline-block; padding: 40px 60px; border-radius: 12px; background-color: #ffffff; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);'>
-                <h2 style='color: #0d9488; margin-bottom: 10px;'>✈️ UAV Log Viewer</h2>
+                <h2 style='color: #0d9488; margin-bottom: 10px;'>UAV Log Viewer</h2>
                 <p style='font-size: 14px;'>Double-click telemetry fields in the sidebar tree to generate interactive plots.</p>
             </div>
         </body>

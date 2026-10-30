@@ -40,6 +40,7 @@ from PySide6.QtGui import QPalette, QColor
 PARAM_VIEWER_STYLE = """
     QDialog {
         background-color: #fafafa;
+        color: #171717;
     }
     QLabel {
         color: #0d9488;
@@ -81,7 +82,7 @@ PARAM_VIEWER_STYLE = """
 class ParamViewerDialog(QDialog):
     def __init__(self, params: Dict[str, Any], parent=None):
         super().__init__(parent)
-        self.setWindowTitle("⚙️ Vehicle Parameters Viewer")
+        self.setWindowTitle("Vehicle Parameters Viewer")
         self.resize(620, 700)
         self.setStyleSheet(PARAM_VIEWER_STYLE)
         self.params = params
@@ -91,7 +92,7 @@ class ParamViewerDialog(QDialog):
         layout.setSpacing(10)
 
         top_bar = QHBoxLayout()
-        top_bar.addWidget(QLabel("🔍 Search Parameter:"))
+        top_bar.addWidget(QLabel("Search Parameter:"))
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Filter param name...")
         self.search_input.textChanged.connect(self.filter_params)

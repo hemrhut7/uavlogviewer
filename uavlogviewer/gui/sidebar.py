@@ -89,6 +89,7 @@ class SidebarWidget(QWidget):
     open_expression_requested = Signal()
     open_coord_transform_requested = Signal()
     open_coord_transform_for_chart_requested = Signal(int)
+    switch_to_live_requested = Signal()
 
     def __init__(self, chart_store: ChartStore, parent=None):
         super().__init__(parent)
@@ -104,7 +105,7 @@ class SidebarWidget(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
 
         # Header Title
-        title_lbl = QLabel("✈️ UAV Log Viewer")
+        title_lbl = QLabel("UAV Log Viewer")
         title_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #0d9488; padding: 2px;")
         layout.addWidget(title_lbl)
 
@@ -136,10 +137,15 @@ class SidebarWidget(QWidget):
         drop_lbl.setStyleSheet("color: #737373; padding: 24px; border: 2px dashed #e5e5e5; border-radius: 8px; background: #fafafa;")
         drop_layout.addWidget(drop_lbl)
 
-        self.btn_open_file = QPushButton("📁 Choose Log File")
+        self.btn_open_file = QPushButton("Choose Log File")
         self.btn_open_file.setStyleSheet("background-color: #0d9488; color: #ffffff; font-weight: bold; padding: 8px; border-radius: 6px;")
         self.btn_open_file.clicked.connect(self.choose_file)
         drop_layout.addWidget(self.btn_open_file)
+
+        self.btn_switch_live = QPushButton("Connect Live MAVLink Device")
+        self.btn_switch_live.setStyleSheet("background-color: #0284c7; color: #ffffff; font-weight: bold; padding: 8px; border-radius: 6px;")
+        self.btn_switch_live.clicked.connect(self.switch_to_live_requested.emit)
+        drop_layout.addWidget(self.btn_switch_live)
 
         home_layout.addWidget(drop_box)
 
@@ -161,7 +167,7 @@ class SidebarWidget(QWidget):
         flight_card_layout.setContentsMargins(8, 8, 8, 8)
         flight_card_layout.setSpacing(4)
 
-        flight_title = QLabel("⏱️ 總飛行時間 (解鎖 ~ 上鎖)")
+        flight_title = QLabel("總飛行時間 (解鎖 ~ 上鎖)")
         flight_title.setStyleSheet("font-weight: bold; color: #0f766e; font-size: 12px;")
         flight_card_layout.addWidget(flight_title)
 
@@ -190,7 +196,7 @@ class SidebarWidget(QWidget):
         wind_card_layout.setContentsMargins(8, 8, 8, 8)
         wind_card_layout.setSpacing(4)
 
-        wind_title = QLabel("💨 飛行風速估測")
+        wind_title = QLabel("飛行風速估測")
         wind_title.setStyleSheet("font-weight: bold; color: #c2410c; font-size: 12px;")
         wind_card_layout.addWidget(wind_title)
 
@@ -233,7 +239,7 @@ class SidebarWidget(QWidget):
         home_layout.addWidget(self.summary_box)
         home_layout.addStretch()
 
-        self.nav_tabs.addTab(home_tab, "🏠 Home")
+        self.nav_tabs.addTab(home_tab, "Home")
 
         # ==========================================
         # 2. PLOT TAB (Plots Setup & Field Tree)
@@ -272,6 +278,7 @@ class SidebarWidget(QWidget):
         self.setup_scroll.setStyleSheet("background-color: #fafafa; border: none;")
 
         self.setup_content = QWidget()
+        self.setup_content.setStyleSheet("background-color: #fafafa;")
         self.setup_content_layout = QVBoxLayout(self.setup_content)
         self.setup_scroll.setWidget(self.setup_content)
 
@@ -323,19 +330,30 @@ class SidebarWidget(QWidget):
         tree_layout = QVBoxLayout(tree_box)
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍 Search fields (e.g. ATT, Roll)...")
+        self.search_input.setPlaceholderText("Search fields (e.g. ATT, Roll)...")
         self.search_input.setStyleSheet("background: #ffffff; border: 1px solid #e5e5e5; border-radius: 4px; padding: 4px;")
         self.search_input.textChanged.connect(self.filter_tree)
         tree_layout.addWidget(self.search_input)
 
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
-        self.tree.setStyleSheet("background: #ffffff; border: 1px solid #e5e5e5; color: #171717;")
+        self.tree.setStyleSheet("""
+            QTreeWidget {
+                background: #ffffff;
+                border: 1px solid #e5e5e5;
+                color: #171717;
+                selection-background-color: #f0fdfa;
+                selection-color: #0f766e;
+            }
+            QTreeWidget::item:hover {
+                background-color: #f8fafc;
+            }
+        """)
         self.tree.itemDoubleClicked.connect(self.on_tree_item_double_clicked)
         tree_layout.addWidget(self.tree)
 
         plot_layout.addWidget(tree_box, stretch=4)
-        self.nav_tabs.addTab(plot_tab, "📈 Plot")
+        self.nav_tabs.addTab(plot_tab, "Plot")
 
         # ==========================================
         # 3. OTHER TAB (Widgets & Tools Toggles)
@@ -346,17 +364,17 @@ class SidebarWidget(QWidget):
         tools_box = QGroupBox("Show / Hide Tools")
         t_layout = QVBoxLayout(tools_box)
 
-        self.btn_params = QPushButton("⚙️ Vehicle Parameters")
+        self.btn_params = QPushButton("Vehicle Parameters")
         self.btn_params.setStyleSheet("background: #f5f5f5; color: #171717; border: 1px solid #e5e5e5; padding: 6px; border-radius: 4px;")
         self.btn_params.clicked.connect(self.open_params_requested.emit)
         t_layout.addWidget(self.btn_params)
 
-        self.btn_msgs = QPushButton("💬 Text Messages Console")
+        self.btn_msgs = QPushButton("Text Messages Console")
         self.btn_msgs.setStyleSheet("background: #f5f5f5; color: #171717; border: 1px solid #e5e5e5; padding: 6px; border-radius: 4px;")
         self.btn_msgs.clicked.connect(self.open_messages_requested.emit)
         t_layout.addWidget(self.btn_msgs)
 
-        self.btn_coord = QPushButton("🌐 Coordinate Transformation (ENU)")
+        self.btn_coord = QPushButton("Coordinate Transformation (ENU)")
         self.btn_coord.setStyleSheet("background: #f5f5f5; color: #171717; border: 1px solid #e5e5e5; padding: 6px; border-radius: 4px;")
         self.btn_coord.clicked.connect(self.open_coord_transform_requested.emit)
         t_layout.addWidget(self.btn_coord)
@@ -364,7 +382,7 @@ class SidebarWidget(QWidget):
         other_layout.addWidget(tools_box)
         other_layout.addStretch()
 
-        self.nav_tabs.addTab(other_tab, "⚙️ Other")
+        self.nav_tabs.addTab(other_tab, "Other")
 
         self.chart_store.updated.connect(self.rebuild_setup_panel)
 
@@ -396,7 +414,7 @@ class SidebarWidget(QWidget):
                 expanded_states[item.text(0)] = item.isExpanded()
 
         self.parsed_log = parsed_log
-        self.lbl_filename.setText(f"📄 {parsed_log.filename}")
+        self.lbl_filename.setText(parsed_log.filename)
         self.lbl_filename.setStyleSheet("color: #0d9488; font-weight: bold;")
         self.update_log_summary(parsed_log)
         self.nav_tabs.setCurrentIndex(1)
@@ -516,7 +534,7 @@ class SidebarWidget(QWidget):
         chart = self.chart_store.charts[chart_idx]
         menu = QMenu(self)
         title_str = "Unlimited (Full)" if chart.max_points <= 0 else f"{chart.max_points:,} pts"
-        title_act = menu.addAction(f"⚙️ Max Points Limit ({title_str})")
+        title_act = menu.addAction(f"Max Points Limit ({title_str})")
         title_act.setEnabled(False)
         menu.addSeparator()
 
@@ -935,20 +953,20 @@ class SidebarWidget(QWidget):
                 h_layout.addStretch()
 
                 pts_str = "Unlimited" if chart.max_points <= 0 else f"{chart.max_points:,} pts"
-                btn_pts = QPushButton(f"⚙️ {pts_str}")
+                btn_pts = QPushButton(f"Pts: {pts_str}")
                 btn_pts.setToolTip("Right-click card or click here to adjust max render points limit")
                 btn_pts.setStyleSheet("background: transparent; color: #ea580c; border: 1px solid #fed7aa; border-radius: 3px; font-size: 10px; padding: 1px 5px;")
                 btn_pts.clicked.connect(lambda _, c_i=c_idx: self.prompt_custom_max_points(c_i))
                 h_layout.addWidget(btn_pts)
 
-                btn_enu = QPushButton("🌐 ENU")
+                btn_enu = QPushButton("ENU")
                 btn_enu.setToolTip("Convert Lat/Lon/Alt to local ENU coordinates and set X=East, Y=North")
                 btn_enu.setStyleSheet("background: transparent; color: #ea580c; border: 1px solid #fed7aa; border-radius: 3px; font-size: 10px; padding: 1px 5px;")
                 btn_enu.clicked.connect(lambda _, c_i=c_idx: self.open_coord_transform_for_chart_requested.emit(c_i))
                 h_layout.addWidget(btn_enu)
 
                 if len(self.chart_store.charts) > 1:
-                    btn_rm_chart = QPushButton("❌")
+                    btn_rm_chart = QPushButton("X")
                     btn_rm_chart.setStyleSheet("background: transparent; color: #ef4444; border: none; font-weight: bold;")
                     btn_rm_chart.setToolTip("Remove scatter plot")
                     btn_rm_chart.clicked.connect(lambda _, idx=c_idx: self.chart_store.remove_chart(idx))
@@ -988,7 +1006,7 @@ class SidebarWidget(QWidget):
                     xy_layout.addWidget(btn_y, stretch=1)
 
                     if len(chart.pairs) > 1:
-                        btn_rm_pair = QPushButton("❌")
+                        btn_rm_pair = QPushButton("X")
                         btn_rm_pair.setStyleSheet("background: transparent; color: #ef4444; border: none; font-weight: bold; padding: 0 4px;")
                         btn_rm_pair.setToolTip("Remove pair")
                         btn_rm_pair.clicked.connect(lambda _, c_i=c_idx, p_i=p_idx: self.chart_store.remove_xy_pair(c_i, p_i))
@@ -996,7 +1014,7 @@ class SidebarWidget(QWidget):
 
                     card_layout.addWidget(xy_row)
 
-                btn_add_pair = QPushButton("➕ Add XY Pair")
+                btn_add_pair = QPushButton("+ Add XY Pair")
                 btn_add_pair.setStyleSheet("""
                     QPushButton { background-color: #fff7ed; color: #ea580c; font-weight: bold; border: 1px dashed #ea580c; border-radius: 4px; padding: 4px; font-size: 11px; margin-top: 4px; }
                     QPushButton:hover { background-color: #ffedd5; }
@@ -1036,14 +1054,14 @@ class SidebarWidget(QWidget):
             h_layout.addStretch()
 
             pts_str = "Unlimited" if chart.max_points <= 0 else f"{chart.max_points:,} pts"
-            btn_pts = QPushButton(f"⚙️ {pts_str}")
+            btn_pts = QPushButton(f"Pts: {pts_str}")
             btn_pts.setToolTip("Right-click card or click here to adjust max render points limit (0 for Full / Unlimited)")
             btn_pts.setStyleSheet("background: transparent; color: #0d9488; border: 1px solid #99f6e4; border-radius: 3px; font-size: 10px; padding: 1px 5px;")
             btn_pts.clicked.connect(lambda _, c_i=c_idx: self.prompt_custom_max_points(c_i))
             h_layout.addWidget(btn_pts)
 
             if len(self.chart_store.charts) > 1:
-                btn_rm_chart = QPushButton("❌")
+                btn_rm_chart = QPushButton("X")
                 btn_rm_chart.setStyleSheet("background: transparent; color: #ef4444; border: none; font-weight: bold;")
                 btn_rm_chart.setToolTip("Remove entire chart")
                 btn_rm_chart.clicked.connect(lambda _, idx=c_idx: self.chart_store.remove_chart(idx))
@@ -1085,16 +1103,18 @@ class SidebarWidget(QWidget):
                     r_layout.addWidget(axis_combo)
 
                     # Color Picker Button
-                    btn_color = QPushButton("■")
-                    btn_color.setStyleSheet(f"color: {expr.color}; background: #fafafa; border: 1px solid #e5e5e5; font-size: 14px; font-weight: bold; border-radius: 4px; padding: 2px 6px;")
+                    btn_color = QPushButton("")
+                    btn_color.setToolTip("Select curve color")
+                    btn_color.setFixedSize(18, 18)
+                    btn_color.setStyleSheet(f"background-color: {expr.color}; border: 1px solid #cbd5e1; border-radius: 4px;")
                     btn_color.clicked.connect(
                         lambda _, c=c_idx, n=expr.name, cur_col=expr.color: self.pick_color(c, n, cur_col)
                     )
                     r_layout.addWidget(btn_color)
 
                     # Remove Field Button
-                    btn_rm = QPushButton("🗑️")
-                    btn_rm.setStyleSheet("background: transparent; border: none; font-size: 12px; padding: 2px;")
+                    btn_rm = QPushButton("X")
+                    btn_rm.setStyleSheet("background: transparent; color: #ef4444; border: none; font-size: 11px; font-weight: bold; padding: 2px;")
                     btn_rm.clicked.connect(
                         lambda _, c=c_idx, n=expr.name: self.chart_store.remove_expression(c, n)
                     )
@@ -1119,7 +1139,7 @@ class SidebarWidget(QWidget):
                     b_layout.setContentsMargins(8, 8, 8, 8)
                     b_layout.setSpacing(6)
 
-                    title_lbl = QLabel("📐 norm( F₁, F₂, ... ) = √(F₁² + F₂² + ...)")
+                    title_lbl = QLabel("norm( F1, F2, ... ) = sqrt(F1^2 + F2^2 + ...)")
                     title_lbl.setStyleSheet("font-weight: bold; color: #0d9488; font-size: 11px;")
                     b_layout.addWidget(title_lbl)
 
@@ -1150,7 +1170,7 @@ class SidebarWidget(QWidget):
                         lbl_f.setStyleSheet("color: #0d9488; font-weight: bold; font-size: 11px; border: none; background: transparent;")
                         chip_layout.addWidget(lbl_f)
 
-                        btn_del_f = QPushButton("✕")
+                        btn_del_f = QPushButton("x")
                         btn_del_f.setCursor(Qt.PointingHandCursor)
                         btn_del_f.setStyleSheet("""
                             QPushButton {
@@ -1190,7 +1210,7 @@ class SidebarWidget(QWidget):
                     btn_cancel.clicked.connect(lambda _, c=c_idx: self.cancel_inline_builder(c))
                     ctrl_layout.addWidget(btn_cancel)
 
-                    btn_ok = QPushButton("✓ Calculate Norm")
+                    btn_ok = QPushButton("Calculate Norm")
                     btn_ok.setStyleSheet("background: #0d9488; color: #ffffff; font-weight: bold; border: none; border-radius: 4px; padding: 4px 12px; font-size: 11px;")
                     btn_ok.clicked.connect(lambda _, c=c_idx: self.execute_inline_calc(c))
                     ctrl_layout.addWidget(btn_ok, stretch=1)
@@ -1255,7 +1275,7 @@ class SidebarWidget(QWidget):
                     action_layout.addWidget(btn_cancel)
 
                     # Object 4: OK Button (Prominent Action)
-                    btn_ok = QPushButton("✓ Add Math Plot")
+                    btn_ok = QPushButton("Add Math Plot")
                     btn_ok.setStyleSheet("background: #0d9488; color: #ffffff; font-weight: bold; border: none; border-radius: 4px; padding: 4px 12px; font-size: 11px;")
                     btn_ok.clicked.connect(lambda _, c=c_idx: self.execute_inline_calc(c))
                     action_layout.addWidget(btn_ok, stretch=1)
@@ -1264,7 +1284,7 @@ class SidebarWidget(QWidget):
                     card_layout.addWidget(b_card)
             else:
                 # Math Calculation Button at the bottom of each Chart card
-                btn_calc = QPushButton(f"🧮 Calculate Data for Chart #{c_idx + 1}")
+                btn_calc = QPushButton(f"Calculate Data for Chart #{c_idx + 1}")
                 btn_calc.setStyleSheet("background-color: #fafafa; color: #0d9488; border: 1px solid #0d9488; font-weight: bold; font-size: 11px; padding: 4px; border-radius: 4px; margin-top: 4px;")
                 btn_calc.clicked.connect(lambda _, idx=c_idx: self.start_inline_builder(idx))
                 card_layout.addWidget(btn_calc)

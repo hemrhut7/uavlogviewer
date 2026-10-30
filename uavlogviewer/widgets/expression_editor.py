@@ -13,6 +13,13 @@ class ExpressionEditorDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Custom Expression Editor")
         self.resize(550, 200)
+        self.setStyleSheet("""
+            QDialog { background-color: #fafafa; color: #171717; }
+            QLabel { color: #171717; font-weight: bold; font-size: 11px; }
+            QLineEdit { background-color: #ffffff; color: #171717; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px; }
+            QPushButton { background-color: #ffffff; color: #171717; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px 12px; font-weight: bold; }
+            QPushButton:hover { background-color: #f8fafc; border-color: #0d9488; }
+        """)
         self.parsed_log = parsed_log
         self.created_field_key = None
 
@@ -31,6 +38,7 @@ class ExpressionEditorDialog(QDialog):
 
         btn_layout = QHBoxLayout()
         self.btn_apply = QPushButton("Evaluate & Create Channel")
+        self.btn_apply.setStyleSheet("background-color: #0d9488; color: #ffffff; border: none; font-weight: bold; padding: 6px 14px; border-radius: 4px;")
         self.btn_apply.clicked.connect(self.evaluate_expression)
         btn_layout.addWidget(self.btn_apply)
 

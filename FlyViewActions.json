@@ -1,0 +1,174 @@
+{
+    "version":  1,
+    "fileType": "MavlinkActions",
+    "actions":
+    [
+        {
+            "label":    "PUMP ON",
+            "description": "Set pump on",
+            "mavCmd":       31010,
+            "param1":       1,
+            "param2":       1
+        },
+        {
+            "label":    "PUMP OFF",
+            "description": "Set pump off",
+            "mavCmd":       31010,
+            "param1":       1,
+            "param2":       0
+        },
+        {
+            "label":    "LED OFF",
+            "description": "Set LED off",
+            "mavCmd":       31011,
+            "param1":       0,
+            "param2":       0
+        },
+        {
+            "label":    "LED NVA",
+            "description": "Set LED NAV",
+            "mavCmd":       31011,
+            "param1":       1,
+            "param2":       0
+        },
+        {
+            "label":    "LED STROBE",
+            "description": "Set LED STROBE",
+            "mavCmd":       31011,
+            "param1":       4,
+            "param2":       0
+        },
+        {
+            "label":    "LED BOTH",
+            "description": "Set LED BOTH",
+            "mavCmd":       31011,
+            "param1":       5,
+            "param2":       0
+        },
+        {
+            "label":    "LED ON",
+            "description": "Set LED on",
+            "mavCmd":       31011,
+            "param1":       6,
+            "param2":       0
+        },
+        {
+            "label":    "LED Blink",
+            "description": "Set LED Blink",
+            "mavCmd":       31011,
+            "param1":       7,
+            "param2":       0
+        },
+        
+        {
+            "label":    "EAHRS stop",
+            "description": "Start INS Calibration",
+            "mavCmd":       31012,
+            "param1":       5,
+            "param2":       1
+        },
+        {
+            "label":    "EAHRS Cali",
+            "description": "Start INS Calibration",
+            "mavCmd":       31012,
+            "param1":       1,
+            "param2":       1
+        },
+        {
+            "label":    "EAHRS GNSS/ON",
+            "description": "Turn on GNSS source of INS-U",
+            "mavCmd":       31012,
+            "param1":       2,
+            "param2":       1
+        },
+        {
+            "label":    "EAHRS GNSS/OFF",
+            "description": "Turn off GNSS source of INS-U",
+            "mavCmd":       31012,
+            "param1":       3,
+            "param2":       1
+        },
+        {
+            "label":    "EAHRS 3D_CALI ON",
+            "description": "Turn OFF GPS1",
+            "mavCmd":       31012,
+            "param1":       6,
+            "param2":       1
+        },
+        {
+            "label":    "EAHRS 3D_CALI OFF",
+            "description": "Turn OFF GPS1",
+            "mavCmd":       31012,
+            "param1":       7,
+            "param2":       1
+        },
+        {
+            "label":    "speed 28",
+            "description": "",
+            "mavCmd":       178,
+            "param1":       0,
+            "param2":       28
+        },
+        {
+            "label":    "speed 29",
+            "description": "",
+            "mavCmd":       178,
+            "param1":       0,
+            "param2":       29
+        },
+        {
+            "label":    "speed 30",
+            "description": "",
+            "mavCmd":       178,
+            "param1":       0,
+            "param2":       30
+        },
+        {
+            "label":    "THR 68",
+            "description": "Set Throttle",
+            "mavCmd":       178,
+            "param1":       0,
+            "param3":       68
+        },
+        {
+            "label":    "RC CONTROL",
+            "description": "Set RC Control",
+            "mavCmd":       31013,
+            "param1":       1
+        },
+        {
+            "label":    "GCS CONTROL",
+            "description": "",
+            "mavCmd":       31013,
+            "param1":       2
+        },
+        {
+            "label":    "Switch to EKF3",
+            "description": "",
+            "mavCmd":       218,
+            "param1":       112,
+            "param2":       0
+        },
+        {
+            "label":    "Switch to EAHRS",
+            "description": "",
+            "mavCmd":       218,
+            "param1":       112,
+            "param2":       2
+        },
+        {
+            "label":    "Avoidance ON",
+            "description": "",
+            "mavCmd":       218,
+            "param1":       40,
+            "param2":       2
+        },
+        {
+            "label":    "Avoidance OFF",
+            "description": "",
+            "mavCmd":       218,
+            "param1":       40,
+            "param2":       0
+        }
+    ]
+}

@@ -5,8 +5,9 @@ with beautified scrollbars and animated file loading progress dialog.
 Dependencies: PySide6, sidebar, plot_container, parsers, widgets, chart_store.
 """
 import os
-from PySide6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QSplitter,
-                               QStatusBar, QMessageBox, QProgressDialog)
+from PySide6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
+                               QStatusBar, QMessageBox, QProgressDialog, QStackedWidget,
+                               QPushButton, QFrame, QLabel, QApplication)
 from PySide6.QtCore import Qt, QThread, Signal, Slot
 from typing import Optional
 
@@ -21,17 +22,239 @@ from uavlogviewer.widgets.param_viewer import ParamViewerDialog
 from uavlogviewer.widgets.message_viewer import MessageViewerDialog
 from uavlogviewer.widgets.expression_editor import ExpressionEditorDialog
 from uavlogviewer.widgets.coord_transform_dialog import CoordTransformDialog
+from uavlogviewer.widgets.mavlink_live_widget import MavlinkLiveWidget
+import pyqtgraph as pg
+pg.setConfigOption('background', 'w')
+pg.setConfigOption('foreground', 'k')
+
+from PySide6.QtGui import QPalette, QColor
+
+def setup_light_palette(app: QApplication):
+    app.setStyle("Fusion")
+    pal = QPalette()
+    pal.setColor(QPalette.Window, QColor("#fafafa"))
+    pal.setColor(QPalette.WindowText, QColor("#171717"))
+    pal.setColor(QPalette.Base, QColor("#ffffff"))
+    pal.setColor(QPalette.AlternateBase, QColor("#f8fafc"))
+    pal.setColor(QPalette.ToolTipBase, QColor("#ffffff"))
+    pal.setColor(QPalette.ToolTipText, QColor("#171717"))
+    pal.setColor(QPalette.Text, QColor("#171717"))
+    pal.setColor(QPalette.Button, QColor("#ffffff"))
+    pal.setColor(QPalette.ButtonText, QColor("#171717"))
+    pal.setColor(QPalette.BrightText, QColor("#ef4444"))
+    pal.setColor(QPalette.Link, QColor("#0d9488"))
+    pal.setColor(QPalette.Highlight, QColor("#0d9488"))
+    pal.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+    app.setPalette(pal)
 
 MAIN_WINDOW_STYLE = """
-QMainWindow { background-color: #fafafa; color: #171717; }
-QGroupBox { font-weight: bold; border: 1px solid #e5e5e5; border-radius: 6px; margin-top: 6px; padding-top: 10px; background-color: #ffffff; }
-QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px; color: #0d9488; }
-QPushButton { background-color: #ffffff; color: #171717; border: 1px solid #e5e5e5; border-radius: 4px; padding: 6px 12px; font-weight: bold; }
-QPushButton:hover { background-color: #f5f5f5; border-color: #0d9488; }
-QPushButton:pressed { background-color: #e5e5e5; }
-QLineEdit { background-color: #ffffff; color: #171717; border: 1px solid #e5e5e5; border-radius: 4px; padding: 4px 8px; }
-QTreeWidget { background-color: #ffffff; color: #171717; border: 1px solid #e5e5e5; font-size: 12px; }
-QStatusBar { background-color: #f5f5f5; color: #525252; }
+/* Global Window and Base Widget Styles */
+QMainWindow, QDialog {
+    background-color: #fafafa;
+    color: #171717;
+}
+QWidget {
+    background-color: #fafafa;
+    color: #171717;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* GroupBox styling */
+QGroupBox {
+    font-weight: bold;
+    border: 1px solid #e5e5e5;
+    border-radius: 6px;
+    margin-top: 6px;
+    padding-top: 10px;
+    background-color: #ffffff;
+    color: #171717;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 8px;
+    padding: 0 4px;
+    color: #0d9488;
+}
+
+/* Buttons */
+QPushButton {
+    background-color: #ffffff;
+    color: #171717;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    padding: 5px 12px;
+    font-weight: bold;
+}
+QPushButton:hover {
+    background-color: #f8fafc;
+    border-color: #0d9488;
+}
+QPushButton:pressed {
+    background-color: #e2e8f0;
+}
+QPushButton:disabled {
+    background-color: #f1f5f9;
+    color: #94a3b8;
+    border-color: #e2e8f0;
+}
+
+/* Inputs, TextEdits, SpinBoxes */
+QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox {
+    background-color: #ffffff;
+    color: #171717;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    padding: 4px 8px;
+    selection-background-color: #0d9488;
+    selection-color: #ffffff;
+}
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+    border-color: #0d9488;
+}
+
+/* ComboBox */
+QComboBox {
+    background-color: #ffffff;
+    color: #171717;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    padding: 4px 8px;
+    min-height: 20px;
+}
+QComboBox:hover {
+    border-color: #0d9488;
+}
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 20px;
+    border-left: 1px solid #cbd5e1;
+}
+QComboBox QAbstractItemView {
+    background-color: #ffffff;
+    color: #171717;
+    border: 1px solid #cbd5e1;
+    selection-background-color: #f0fdfa;
+    selection-color: #0d9488;
+}
+
+/* TabWidget and TabBar */
+QTabWidget::pane {
+    border: 1px solid #e2e8f0;
+    background-color: #ffffff;
+    border-radius: 6px;
+}
+QTabBar::tab {
+    background-color: #fafafa;
+    color: #525252;
+    padding: 6px 14px;
+    font-weight: bold;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    margin-right: 2px;
+    border: 1px solid #e2e8f0;
+    border-bottom: none;
+}
+QTabBar::tab:selected {
+    background-color: #ffffff;
+    color: #0d9488;
+    border-bottom: 2px solid #0d9488;
+}
+
+/* Tables and Trees */
+QTableWidget, QTableView, QTreeWidget, QTreeView, QListWidget, QListView {
+    background-color: #ffffff;
+    alternate-background-color: #f8fafc;
+    color: #171717;
+    gridline-color: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    font-size: 12px;
+    selection-background-color: #f0fdfa;
+    selection-color: #0f766e;
+}
+QHeaderView::section {
+    background-color: #f8fafc;
+    color: #334155;
+    font-weight: bold;
+    font-size: 11px;
+    padding: 5px;
+    border: 1px solid #e2e8f0;
+}
+QTableCornerButton::section {
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+
+/* ScrollArea and Containers */
+QScrollArea, QAbstractScrollArea {
+    background-color: #fafafa;
+    border: none;
+}
+
+/* Splitters */
+QSplitter::handle {
+    background-color: #e2e8f0;
+}
+
+/* Menus */
+QMenu {
+    background-color: #ffffff;
+    color: #171717;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    padding: 4px;
+}
+QMenu::item {
+    padding: 6px 20px;
+    border-radius: 3px;
+}
+QMenu::item:selected {
+    background-color: #f0fdfa;
+    color: #0d9488;
+}
+QMenu::separator {
+    height: 1px;
+    background-color: #e2e8f0;
+    margin: 4px 0px;
+}
+
+/* StatusBar */
+QStatusBar {
+    background-color: #f8fafc;
+    color: #525252;
+    border-top: 1px solid #e2e8f0;
+}
+
+/* ProgressBar */
+QProgressBar {
+    background-color: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    text-align: center;
+    color: #171717;
+    font-weight: bold;
+}
+QProgressBar::chunk {
+    background-color: #0d9488;
+    border-radius: 3px;
+}
+
+/* CheckBox and RadioButton */
+QCheckBox, QRadioButton {
+    color: #171717;
+    font-weight: bold;
+    background: transparent;
+}
+QCheckBox::indicator, QRadioButton::indicator {
+    background-color: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 3px;
+}
+QCheckBox::indicator:checked {
+    background-color: #0d9488;
+    border-color: #0d9488;
+}
 
 /* Custom Beautified ScrollBars */
 QScrollBar:vertical {
@@ -109,6 +332,10 @@ class LogParseWorker(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        app = QApplication.instance()
+        if app:
+            setup_light_palette(app)
+
         self.setWindowTitle("UAV Log Viewer")
         self.resize(1380, 850)
 
@@ -121,11 +348,50 @@ class MainWindow(QMainWindow):
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        main_layout = QHBoxLayout(central_widget)
-        main_layout.setContentsMargins(4, 4, 4, 4)
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(6, 6, 6, 6)
+        main_layout.setSpacing(6)
+
+        # Top Mode Switcher Bar
+        mode_bar = QFrame()
+        mode_bar.setStyleSheet("QFrame { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; }")
+        mode_bar_lay = QHBoxLayout(mode_bar)
+        mode_bar_lay.setContentsMargins(8, 4, 8, 4)
+        mode_bar_lay.setSpacing(8)
+
+        app_title = QLabel("UAV Log Viewer")
+        app_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #0d9488;")
+        mode_bar_lay.addWidget(app_title)
+
+        mode_bar_lay.addSpacing(12)
+
+        self.btn_mode_offline = QPushButton("Offline Log Analysis")
+        self.btn_mode_offline.clicked.connect(lambda: self.switch_mode(0))
+        mode_bar_lay.addWidget(self.btn_mode_offline)
+
+        self.btn_mode_live = QPushButton("Live MAVLink Device")
+        self.btn_mode_live.clicked.connect(lambda: self.switch_mode(1))
+        mode_bar_lay.addWidget(self.btn_mode_live)
+
+        mode_bar_lay.addStretch()
+
+        self.lbl_active_mode_desc = QLabel("Mode: Offline Analysis")
+        self.lbl_active_mode_desc.setStyleSheet("color: #64748b; font-size: 11px;")
+        mode_bar_lay.addWidget(self.lbl_active_mode_desc)
+
+        main_layout.addWidget(mode_bar)
+
+        # Main Stacked Widget
+        self.main_stack = QStackedWidget()
+        main_layout.addWidget(self.main_stack, 1)
+
+        # Page 0: Offline Log Analysis (Splitter with Sidebar & PlotContainer)
+        self.offline_container = QWidget()
+        offline_layout = QHBoxLayout(self.offline_container)
+        offline_layout.setContentsMargins(0, 0, 0, 0)
 
         self.splitter = QSplitter(Qt.Horizontal)
-        main_layout.addWidget(self.splitter)
+        offline_layout.addWidget(self.splitter)
 
         # Left Sidebar Panel
         self.sidebar = SidebarWidget(self.chart_store)
@@ -135,22 +401,54 @@ class MainWindow(QMainWindow):
         self.sidebar.open_expression_requested.connect(self.open_expression_editor)
         self.sidebar.open_coord_transform_requested.connect(self.open_coord_transform)
         self.sidebar.open_coord_transform_for_chart_requested.connect(self.open_coord_transform_for_chart)
+        self.sidebar.switch_to_live_requested.connect(lambda: self.switch_mode(1))
         self.splitter.addWidget(self.sidebar)
 
         # Right Main Plot Container
         self.plot_container = PlotContainer(self.chart_store)
         self.plot_container.point_alt_clicked.connect(self.on_chart_alt_clicked)
         self.splitter.addWidget(self.plot_container)
-
         self.splitter.setSizes([380, 1000])
+
+        self.main_stack.addWidget(self.offline_container)
+
+        # Page 1: Live MAVLink Device Workbench
+        self.mavlink_live_widget = MavlinkLiveWidget(self)
+        self.mavlink_live_widget.open_log_requested.connect(self.on_live_open_log_requested)
+        self.main_stack.addWidget(self.mavlink_live_widget)
+
+        self.switch_mode(0)
 
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Ready. Select a log file to begin.")
+        self.status_bar.showMessage("Ready. Select a log file or connect to live MAVLink device.")
 
         self.param_dialog: Optional[ParamViewerDialog] = None
         self.message_dialog: Optional[MessageViewerDialog] = None
         self.expr_dialog: Optional[ExpressionEditorDialog] = None
+
+    def switch_mode(self, mode_idx: int):
+        self.main_stack.setCurrentIndex(mode_idx)
+        active_btn_qss = "background-color: #0d9488; color: white; border: none; font-weight: bold; border-radius: 6px; padding: 5px 14px;"
+        inactive_btn_qss = "background-color: transparent; color: #475569; border: 1px solid #cbd5e1; border-radius: 6px; padding: 5px 14px;"
+
+        if mode_idx == 0:
+            self.btn_mode_offline.setStyleSheet(active_btn_qss)
+            self.btn_mode_live.setStyleSheet(inactive_btn_qss)
+            self.lbl_active_mode_desc.setText("Mode: Offline Analysis")
+        else:
+            self.btn_mode_offline.setStyleSheet(inactive_btn_qss)
+            self.btn_mode_live.setStyleSheet(active_btn_qss)
+            self.lbl_active_mode_desc.setText("Mode: Live MAVLink Device")
+
+    def on_live_open_log_requested(self, filepath: str):
+        self.switch_mode(0)
+        self.load_log_file(filepath)
+
+    def closeEvent(self, event):
+        if hasattr(self, 'mavlink_live_widget'):
+            self.mavlink_live_widget.client.disconnect()
+        super().closeEvent(event)
 
     def load_log_file(self, filepath: str):
         if not os.path.exists(filepath):
@@ -185,6 +483,8 @@ class MainWindow(QMainWindow):
         self.parsed_log = parsed_log
         self.sidebar.populate_field_tree(parsed_log)
         self.plot_container.set_parsed_log(parsed_log)
+        if hasattr(self, 'mavlink_live_widget'):
+            self.mavlink_live_widget.param_widget.set_offline_log_params(parsed_log.params, parsed_log.filename)
         self.status_bar.showMessage(f"Loaded {parsed_log.filename} successfully ({len(parsed_log.time_series)} fields, {len(parsed_log.params)} parameters).")
 
     @Slot(str)

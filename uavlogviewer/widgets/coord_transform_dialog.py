@@ -33,10 +33,11 @@ class CoordTransformDialog(QDialog):
         self.chart_store = chart_store
         self.target_chart_idx = target_chart_idx
 
-        self.setWindowTitle("🌐 經緯度座標轉換 (Lat/Lon/Alt -> ENU)")
+        self.setWindowTitle("經緯度座標轉換 (Lat/Lon/Alt -> ENU)")
         self.resize(520, 480)
         self.setStyleSheet("""
             QDialog { background-color: #fafafa; color: #171717; }
+            QLabel { color: #171717; }
             QGroupBox { font-weight: bold; border: 1px solid #e5e5e5; border-radius: 6px; margin-top: 6px; padding-top: 10px; background-color: #ffffff; }
             QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px; color: #0d9488; }
             QPushButton { background-color: #ffffff; color: #171717; border: 1px solid #e5e5e5; border-radius: 4px; padding: 6px 12px; font-weight: bold; }
@@ -79,7 +80,7 @@ class CoordTransformDialog(QDialog):
         row_fields.addWidget(self.lbl_alt)
         prev_layout.addLayout(row_fields)
 
-        self.lbl_origin = QLabel("📍 參考原點 (Origin 1st Point): -")
+        self.lbl_origin = QLabel("參考原點 (Origin 1st Point): -")
         self.lbl_origin.setStyleSheet("background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 6px; color: #334155; font-size: 11px;")
         prev_layout.addWidget(self.lbl_origin)
 
@@ -124,11 +125,11 @@ class CoordTransformDialog(QDialog):
     def populate_messages(self):
         self.msg_list.clear()
         if not self.candidates:
-            item = QListWidgetItem("⚠️ 未自動偵測到同時包含 Lat, Lon, Alt 的訊息")
+            item = QListWidgetItem("未自動偵測到同時包含 Lat, Lon, Alt 的訊息")
             item.setFlags(Qt.NoItemFlags)
             self.msg_list.addItem(item)
             self.btn_calc.setEnabled(False)
-            self.lbl_origin.setText("📍 參考原點: 未偵測到座標訊息")
+            self.lbl_origin.setText("參考原點: 未偵測到座標訊息")
             return
 
         self.btn_calc.setEnabled(True)
@@ -139,7 +140,7 @@ class CoordTransformDialog(QDialog):
             alt_f = cand['alt_field']
             n_pts = cand['samples']
 
-            display_text = f"📍 {msg_t}  (Lat: {lat_f}, Lon: {lon_f}, Alt: {alt_f}) — {n_pts:,} pts"
+            display_text = f"{msg_t}  (Lat: {lat_f}, Lon: {lon_f}, Alt: {alt_f}) — {n_pts:,} pts"
             item = QListWidgetItem(display_text)
             item.setData(Qt.UserRole, cand)
             self.msg_list.addItem(item)
@@ -171,9 +172,9 @@ class CoordTransformDialog(QDialog):
             lat0 = lat_arr[0] / 1e7 if abs(lat_arr[0]) > 180 else lat_arr[0]
             lon0 = lon_arr[0] / 1e7 if abs(lon_arr[0]) > 180 else lon_arr[0]
             alt0 = alt_arr[0]
-            self.lbl_origin.setText(f"📍 參考原點 (Origin 1st Point): Lat0 = {lat0:.7f}°, Lon0 = {lon0:.7f}°, Alt0 = {alt0:.2f} m")
+            self.lbl_origin.setText(f"參考原點 (Origin 1st Point): Lat0 = {lat0:.7f}°, Lon0 = {lon0:.7f}°, Alt0 = {alt0:.2f} m")
         else:
-            self.lbl_origin.setText("📍 參考原點: 資料長度不足")
+            self.lbl_origin.setText("參考原點: 資料長度不足")
 
     def update_preview_output_names(self, prefix: str):
         prefix_str = prefix.strip() or "RES"

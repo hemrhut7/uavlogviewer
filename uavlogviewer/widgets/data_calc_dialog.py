@@ -27,6 +27,9 @@ class DataCalcDialog(QDialog):
         self.resize(450, 360)
         self.setStyleSheet("""
             QDialog { background-color: #fafafa; color: #171717; }
+            QLabel, QRadioButton { color: #171717; background: transparent; }
+            QRadioButton::indicator { background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; }
+            QRadioButton::indicator:checked { background-color: #0d9488; border-color: #0d9488; }
             QGroupBox { font-weight: bold; border: 1px solid #e5e5e5; border-radius: 6px; margin-top: 6px; padding-top: 10px; background-color: #ffffff; }
             QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px; color: #0d9488; }
             QPushButton { background-color: #ffffff; color: #171717; border: 1px solid #e5e5e5; border-radius: 4px; padding: 6px 12px; font-weight: bold; }
@@ -108,12 +111,12 @@ class DataCalcDialog(QDialog):
 
         # OK / Cancel Buttons
         btn_layout = QHBoxLayout()
-        self.btn_ok = QPushButton("✅ Calculate & Add to Chart")
+        self.btn_ok = QPushButton("Calculate & Add to Chart")
         self.btn_ok.setStyleSheet("background-color: #0d9488; color: #ffffff;")
         self.btn_ok.clicked.connect(self.perform_calculation)
         btn_layout.addWidget(self.btn_ok)
 
-        self.btn_cancel = QPushButton("❌ Cancel")
+        self.btn_cancel = QPushButton("Cancel")
         self.btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(self.btn_cancel)
 

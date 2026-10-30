@@ -30,12 +30,13 @@ class PlotContainer(QWidget):
 
         # Plotly Embedded Viewport Widget (QWebEngineView)
         self.plotly_web_view = QWebEngineView()
+        self.plotly_web_view.page().setBackgroundColor(QColor("#fafafa"))
         self.plotly_web_view.page().profile().downloadRequested.connect(self.on_download_requested)
         self.plotly_web_view.titleChanged.connect(self.on_web_title_changed)
         self.layout.addWidget(self.plotly_web_view, stretch=4)
 
         # Structured Viewport Statistics Box & Table Widget
-        self.stats_box = QGroupBox("📊 [Full Range]")
+        self.stats_box = QGroupBox("Statistics [Full Range]")
         self.stats_box.setStyleSheet("""
             QGroupBox { font-weight: bold; font-size: 11px; border: 1px solid #e5e5e5; border-radius: 4px; background: #fafafa; margin-top: 4px; padding-top: 10px; }
             QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px; color: #0d9488; }
@@ -77,7 +78,7 @@ class PlotContainer(QWidget):
         self.update_plots()
 
     def clear_plots(self):
-        self.stats_box.setTitle("📊 [No Log Loaded]")
+        self.stats_box.setTitle("Statistics [No Log Loaded]")
         self.stats_table.setRowCount(0)
         self.plotly_web_view.setHtml("<html><body style='background-color:#fafafa;'></body></html>")
 
@@ -87,7 +88,7 @@ class PlotContainer(QWidget):
             return
 
         if not self.chart_store.has_any_expressions():
-            self.stats_box.setTitle("📊 [No Fields Plotted]")
+            self.stats_box.setTitle("Statistics [No Fields Plotted]")
             self.stats_table.setRowCount(0)
             self.update_embedded_plotly()
             return
@@ -167,12 +168,12 @@ class PlotContainer(QWidget):
 
         active_charts = [c for c in self.chart_store.charts if len(c.expressions) > 0]
         if not active_charts:
-            self.stats_box.setTitle("📊 [No Fields Plotted]")
+            self.stats_box.setTitle("Statistics [No Fields Plotted]")
             self.stats_table.setRowCount(0)
             return
 
         range_tag = f" [{x0:.1f}s ~ {x1:.1f}s, dt = {x1 - x0:.1f}s]" if (x0 is not None and x1 is not None) else " [Full Range]"
-        self.stats_box.setTitle(f"📊 {range_tag}")
+        self.stats_box.setTitle(f"Statistics{range_tag}")
 
         table_rows = []
 
