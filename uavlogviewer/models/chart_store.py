@@ -16,7 +16,7 @@ class CalcBuilderState:
     def __init__(self):
         self.active_operand: str = 'A'  # 'A', 'B', etc.
         self.operand_a: str = ''
-        self.operator: str = '+'        # '+', '-', '*', '/', 'norm', 'wrap_180', 'wrap_360', 'rad2deg', 'deg2rad', 'ang_sub'
+        self.operator: str = '+'        # '+', '-', '*', '/', 'norm', 'vibe_mag', 'wrap_180', 'wrap_360', 'rad2deg', 'deg2rad', 'vibe', 'ang_sub'
         self.operand_b: str = ''
         self.norm_operands: List[str] = []
         self.active_norm_idx: int = 0
@@ -211,6 +211,13 @@ class ChartStore(QObject):
                     pair.x_field = field_name
                 elif target == 'Y':
                     pair.y_field = field_name
+                self.updated.emit()
+
+    def set_xy_pair_color(self, chart_idx: int, pair_idx: int, color: str):
+        if 0 <= chart_idx < len(self.charts):
+            chart = self.charts[chart_idx]
+            if chart.chart_type == "scatter" and 0 <= pair_idx < len(chart.pairs):
+                chart.pairs[pair_idx].color = color
                 self.updated.emit()
 
     def has_any_expressions(self) -> bool:

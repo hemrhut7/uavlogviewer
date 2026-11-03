@@ -30,6 +30,7 @@ python -u main.py data/2026-04-17\ 14-14-16.tlog
 2. **互動式多圖表顯示 (Multi-Chart)**：支援多頻道獨立勾選、繪製、時間軸同步 (X-axis Sync) 與游標同步。
 3. **飛行模式與事件標記**：自動根據日誌中的 `MODE` 數據繪製高對比度飛行模式背景區間。
 4. **參數檢視 (Param Viewer)** 與 **數值計算 (Expression Editor / Data Calculator)**。
+5. **繪圖區訊息匯出至 CSV (Export to CSV)**：將繪圖區中目前顯示的所有 Message / 數據欄位匯出為 `.csv` 檔案，支援自訂欄位範圍、可視縮放時間範圍與多頻率時間戳記對齊（聯集原始戳記或向前填充）。
 
 ---
 

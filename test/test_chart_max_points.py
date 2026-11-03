@@ -68,5 +68,14 @@ class TestChartMaxPoints(unittest.TestCase):
         # Verify range is preserved on timeline
         self.assertIn('"range":[10.0,20.0]', html_filtered.replace(' ', ''))
 
+    def test_set_xy_pair_color(self):
+        chart_idx = self.chart_store.add_xy_chart("ATT.Roll", "ATT.Roll")
+
+        self.chart_store.set_xy_pair_color(chart_idx, 0, "#123456")
+
+        self.assertEqual(self.chart_store.charts[chart_idx].pairs[0].color, "#123456")
+        html = generate_plotly_html(self.log, self.chart_store)
+        self.assertIn("#123456", html)
+
 if __name__ == "__main__":
     unittest.main()

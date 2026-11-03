@@ -10,16 +10,28 @@ import numpy as np
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QLineEdit, QTreeWidget, QTreeWidgetItem, QLabel,
                                QFileDialog, QGroupBox, QColorDialog, QComboBox, QListView,
-                               QTabWidget, QCheckBox, QScrollArea, QFrame, QRadioButton, QMessageBox,
+                               QTabWidget, QCheckBox, QScrollArea, QFrame, QRadioButton, QMessageBox, QDialog,
                                QMenu, QInputDialog)
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPalette
 from typing import Dict, List, Optional
 from uavlogviewer.parsers.base_parser import ParsedLog, format_data_rate
-from uavlogviewer.models.chart_store import ChartStore, CalcBuilderState, DEFAULT_AXIS_COLORS
+from uavlogviewer.models.chart_store import (
+    ChartStore,
+    CalcBuilderState,
+    DEFAULT_AXIS_COLORS,
+    XYScatterPair
+)
 from uavlogviewer.tools.plotly_exporter import truncate_text
 from uavlogviewer.tools.log_summary import analyze_log_summary
 from uavlogviewer.gui.clean_combobox import CleanComboBox
+from uavlogviewer.tools.vibration_fft import (
+    compute_fft,
+    extract_fft_segment,
+    compute_ap_vibration,
+    compute_ap_vibration_3d
+)
+from uavlogviewer.widgets.fft_selection_dialog import FFTSelectionDialog
 
 def find_sensor_vector_groups(parsed_log) -> dict:
     if not parsed_log or not parsed_log.time_series:
@@ -89,6 +101,7 @@ class SidebarWidget(QWidget):
     open_expression_requested = Signal()
     open_coord_transform_requested = Signal()
     open_coord_transform_for_chart_requested = Signal(int)
+    open_export_csv_requested = Signal()
 
     def __init__(self, chart_store: ChartStore, parent=None):
         super().__init__(parent)
@@ -131,7 +144,7 @@ class SidebarWidget(QWidget):
         drop_box = QGroupBox("Log File Target")
         drop_layout = QVBoxLayout(drop_box)
         
-        drop_lbl = QLabel("Drag & drop .bin / .BIN / .tlog / .txt files here\nor click below to browse.")
+        drop_lbl = QLabel("Drag & drop .bin / .BIN / .tlog / .txt / .csv files here\nor click below to browse.")
         drop_lbl.setAlignment(Qt.AlignCenter)
         drop_lbl.setStyleSheet("color: #737373; padding: 24px; border: 2px dashed #e5e5e5; border-radius: 8px; background: #fafafa;")
         drop_layout.addWidget(drop_lbl)
@@ -291,6 +304,12 @@ class SidebarWidget(QWidget):
         self.btn_add_xy.clicked.connect(self.on_add_xy_clicked)
         global_btns_layout.addWidget(self.btn_add_xy)
 
+        self.btn_export_csv = QPushButton("💾 Export CSV")
+        self.btn_export_csv.setStyleSheet("background-color: #2563eb; color: #ffffff; font-weight: bold; border-radius: 4px; padding: 4px 10px;")
+        self.btn_export_csv.setToolTip("將繪圖區中所有 Message 匯出為 .csv 檔案")
+        self.btn_export_csv.clicked.connect(self.open_export_csv_requested.emit)
+        global_btns_layout.addWidget(self.btn_export_csv)
+
         chk_style = """
         QCheckBox {
             color: #171717;
@@ -361,6 +380,11 @@ class SidebarWidget(QWidget):
         self.btn_coord.clicked.connect(self.open_coord_transform_requested.emit)
         t_layout.addWidget(self.btn_coord)
 
+        self.btn_export_tool = QPushButton("💾 匯出繪圖區訊息至 CSV (Export Plotted to CSV)")
+        self.btn_export_tool.setStyleSheet("background: #f5f5f5; color: #171717; border: 1px solid #e5e5e5; padding: 6px; border-radius: 4px;")
+        self.btn_export_tool.clicked.connect(self.open_export_csv_requested.emit)
+        t_layout.addWidget(self.btn_export_tool)
+
         other_layout.addWidget(tools_box)
         other_layout.addStretch()
 
@@ -374,6 +398,7 @@ class SidebarWidget(QWidget):
             "Open UAV Log File",
             "",
             "UAV Logs (*.bin *.BIN *.log *.LOG *.tlog *.TLOG *.txt *.TXT *.csv *.CSV);;"
+            "CSV Logs (*.csv *.CSV);;"
             "DataFlash Logs (*.bin *.BIN *.log *.LOG);;"
             "MAVLink Logs (*.tlog *.TLOG);;"
             "DJI Logs (*.txt *.TXT *.csv *.CSV);;"
@@ -583,7 +608,7 @@ class SidebarWidget(QWidget):
 
         if chart.pending_builder is not None:
             builder = chart.pending_builder
-            if builder.operator == "norm":
+            if builder.operator in ["norm", "vibe_mag"]:
                 if field_key not in builder.norm_operands:
                     builder.norm_operands.append(field_key)
                 builder.active_norm_idx = len(builder.norm_operands) - 1
@@ -661,7 +686,7 @@ class SidebarWidget(QWidget):
             if self.current_input_op_b.text() != builder.operand_b:
                 self.current_input_op_b.setText(builder.operand_b)
 
-            is_unary = builder.operator in ["wrap_180", "wrap_360", "rad2deg", "deg2rad"]
+            is_unary = builder.operator in ["wrap_180", "wrap_360", "rad2deg", "deg2rad", "vibe"]
             if is_unary:
                 self.current_input_op_b.setEnabled(False)
                 self.current_input_op_b.setPlaceholderText("(Unary operation)")
@@ -694,7 +719,7 @@ class SidebarWidget(QWidget):
 
         builder.operator = new_op
 
-        if new_op == "norm":
+        if new_op in ["norm", "vibe_mag"]:
             if not builder.norm_operands:
                 ops = []
                 if builder.operand_a:
@@ -718,15 +743,15 @@ class SidebarWidget(QWidget):
             return
 
         op_str = builder.operator
-        UNARY_OPS = ["wrap_180", "wrap_360", "rad2deg", "deg2rad"]
+        UNARY_OPS = ["wrap_180", "wrap_360", "rad2deg", "deg2rad", "vibe"]
 
-        if op_str == "norm":
+        if op_str in ["norm", "vibe_mag"]:
             valid_fields = [f.strip() for f in builder.norm_operands if f.strip() in self.parsed_log.time_series]
             if not valid_fields and builder.operand_a.strip() in self.parsed_log.time_series:
                 valid_fields = [builder.operand_a.strip()]
 
             if not valid_fields:
-                QMessageBox.warning(self, "Invalid Selection", "Please select at least 1 valid field for norm calculation.")
+                QMessageBox.warning(self, "Invalid Selection", "Please select valid field(s) for calculation.")
                 return
 
             field_lengths = [(f, len(self.parsed_log.time_series[f])) for f in valid_fields]
@@ -754,8 +779,13 @@ class SidebarWidget(QWidget):
                     interp_y = np.interp(t_base, t_f, y_arr) if len(t_f) > 0 else y_arr
                     arrays.append(interp_y)
 
-            y_res = np.sqrt(sum(a**2 for a in arrays))
-            res_name = f"norm({', '.join(valid_fields)})"
+            if op_str == "norm":
+                y_res = np.sqrt(sum(a**2 for a in arrays))
+                res_name = f"norm({', '.join(valid_fields)})"
+            else:  # vibe_mag
+                vibes = [compute_ap_vibration(a, t_base) for a in arrays]
+                y_res = np.sqrt(sum(v**2 for v in vibes))
+                res_name = f"vibe_mag({', '.join(valid_fields)})"
 
         else:
             field_a = builder.operand_a.strip()
@@ -788,6 +818,9 @@ class SidebarWidget(QWidget):
                 elif op_str == "deg2rad":
                     y_res = y_a * (np.pi / 180.0)
                     res_name = f"deg2rad({field_a})"
+                elif op_str == "vibe":
+                    y_res = compute_ap_vibration(y_a, t_base)
+                    res_name = f"vibe({field_a})"
             elif op_str == "ang_sub":
                 operand_b = builder.operand_b.strip()
                 if not operand_b:
@@ -895,6 +928,112 @@ class SidebarWidget(QWidget):
         chart.pending_builder = None
         self.rebuild_setup_panel()
 
+    def start_fft_for_chart(self, chart_idx: int):
+        if not self.parsed_log or not self.parsed_log.time_series:
+            QMessageBox.information(self, "No Log Loaded", "Please load a log file first.")
+            return
+
+        if not 0 <= chart_idx < len(self.chart_store.charts) or self.chart_store.charts[chart_idx].chart_type != "scatter":
+            QMessageBox.warning(self, "Invalid Chart", "FFT results can only be added to an XY Scatter chart.")
+            return
+
+        dialog = FFTSelectionDialog(
+            sorted(self.parsed_log.time_series.keys()),
+            self
+        )
+        if dialog.exec() == QDialog.Accepted:
+            selected_fields = dialog.selected_fields()
+            if not selected_fields:
+                QMessageBox.information(self, "No Fields Selected", "Select at least one data field for FFT.")
+                return
+            self.calculate_fft_for_fields(chart_idx, selected_fields)
+
+    def calculate_fft_for_fields(self, chart_idx: int, fields: List[str]):
+        if not self.parsed_log:
+            QMessageBox.information(self, "No Log Loaded", "Please load a log file first.")
+            return
+        if not 0 <= chart_idx < len(self.chart_store.charts):
+            QMessageBox.warning(self, "Invalid Chart", "The selected XY Scatter chart no longer exists.")
+            return
+
+        chart = self.chart_store.charts[chart_idx]
+        if chart.chart_type != "scatter":
+            QMessageBox.warning(self, "Invalid Chart", "FFT results can only be added to an XY Scatter chart.")
+            return
+
+        selected_fields = list(dict.fromkeys(fields))
+        invalid_fields = [field for field in selected_fields if field not in self.parsed_log.time_series]
+        if invalid_fields:
+            QMessageBox.warning(
+                self,
+                "Invalid Selection",
+                f"Selected data field(s) are no longer available: {', '.join(invalid_fields)}"
+            )
+            return
+        if not selected_fields:
+            QMessageBox.information(self, "No Fields Selected", "Select at least one data field for FFT.")
+            return
+
+        for field in selected_fields:
+            values = np.asarray(self.parsed_log.time_series[field])
+            timestamps = self.parsed_log.timestamps.get(
+                field,
+                self.parsed_log.timestamps.get(
+                    field.rsplit(".", 1)[0],
+                    np.array([])
+                )
+            )
+            if len(timestamps) != len(values):
+                timestamps = np.arange(len(values), dtype=np.float64)
+
+            _, segment_values, sample_rate = extract_fft_segment(
+                timestamps,
+                values,
+                mode=self.chart_store.segment_filter
+            )
+            frequencies, magnitudes = compute_fft(segment_values, sample_rate)
+            clean_name = field.replace(".", "_")
+            frequency_key = f"FFT.freq_{clean_name}"
+            magnitude_key = f"FFT.mag_{clean_name}"
+
+            self.parsed_log.time_series[frequency_key] = frequencies
+            self.parsed_log.time_series[magnitude_key] = magnitudes
+            self.parsed_log.timestamps[frequency_key] = frequencies
+            self.parsed_log.timestamps[magnitude_key] = frequencies
+
+            fft_fields = self.parsed_log.field_tree.setdefault("FFT", [])
+            for fft_field in (f"freq_{clean_name}", f"mag_{clean_name}"):
+                if fft_field not in fft_fields:
+                    fft_fields.append(fft_field)
+
+            empty_pair_idx = next(
+                (
+                    index for index, pair in enumerate(chart.pairs)
+                    if not pair.x_field and not pair.y_field
+                ),
+                None
+            )
+            if empty_pair_idx is not None:
+                pair = chart.pairs[empty_pair_idx]
+                pair.x_field = frequency_key
+                pair.y_field = magnitude_key
+                chart.active_pair_idx = empty_pair_idx
+            else:
+                chart.pairs.append(
+                    XYScatterPair(
+                        frequency_key,
+                        magnitude_key,
+                        color=DEFAULT_AXIS_COLORS[
+                            len(chart.pairs) % len(DEFAULT_AXIS_COLORS)
+                        ]
+                    )
+                )
+                chart.active_pair_idx = len(chart.pairs) - 1
+
+        chart.active_xy_target = "X"
+        self.chart_store.updated.emit()
+        self.populate_field_tree(self.parsed_log)
+
     def rebuild_setup_panel(self):
         self.current_btn_op_a = None
         self.current_input_op_b = None
@@ -954,6 +1093,13 @@ class SidebarWidget(QWidget):
                 btn_enu.clicked.connect(lambda _, c_i=c_idx: self.open_coord_transform_for_chart_requested.emit(c_i))
                 h_layout.addWidget(btn_enu)
 
+                btn_fft = QPushButton("FFT")
+                btn_fft.setObjectName(f"fft_scatter_button_{c_idx}")
+                btn_fft.setToolTip("Select one or more data fields and add their FFT spectra to this Scatter")
+                btn_fft.setStyleSheet("background: transparent; color: #ea580c; border: 1px solid #fed7aa; border-radius: 3px; font-size: 10px; padding: 1px 5px;")
+                btn_fft.clicked.connect(lambda _, c_i=c_idx: self.start_fft_for_chart(c_i))
+                h_layout.addWidget(btn_fft)
+
                 if len(self.chart_store.charts) > 1:
                     btn_rm_chart = QPushButton("❌")
                     btn_rm_chart.setStyleSheet("background: transparent; color: #ef4444; border: none; font-weight: bold;")
@@ -993,6 +1139,14 @@ class SidebarWidget(QWidget):
                     vs_lbl.setStyleSheet("font-weight: bold; color: #ea580c; font-size: 11px;")
                     xy_layout.addWidget(vs_lbl)
                     xy_layout.addWidget(btn_y, stretch=1)
+
+                    btn_color = QPushButton("■")
+                    btn_color.setToolTip("Adjust XY scatter data color")
+                    btn_color.setStyleSheet(f"color: {pair.color}; background: #fafafa; border: 1px solid #fed7aa; font-size: 14px; font-weight: bold; border-radius: 4px; padding: 2px 6px;")
+                    btn_color.clicked.connect(
+                        lambda _, c=c_idx, p=p_idx, cur_col=pair.color: self.pick_xy_pair_color(c, p, cur_col)
+                    )
+                    xy_layout.addWidget(btn_color)
 
                     if len(chart.pairs) > 1:
                         btn_rm_pair = QPushButton("❌")
@@ -1113,7 +1267,7 @@ class SidebarWidget(QWidget):
             if chart.pending_builder is not None:
                 builder = chart.pending_builder
 
-                if builder.operator == "norm":
+                if builder.operator in ["norm", "vibe_mag"]:
                     b_card = QFrame()
                     b_card.setStyleSheet("""
                         QFrame {
@@ -1126,7 +1280,16 @@ class SidebarWidget(QWidget):
                     b_layout.setContentsMargins(8, 8, 8, 8)
                     b_layout.setSpacing(6)
 
-                    title_lbl = QLabel("📐 norm( F₁, F₂, ... ) = √(F₁² + F₂² + ...)")
+                    if builder.operator == "norm":
+                        title_text = "📐 norm( F₁, F₂, ... ) = √(F₁² + F₂² + ...)"
+                        btn_ok_text = "✓ Calculate Norm"
+                        no_f_text = "Click fields in tree to add to norm..."
+                    else:
+                        title_text = "⚡ vibe_mag( F₁, F₂, F₃ ) = √(v₁² + v₂² + v₃²)"
+                        btn_ok_text = "✓ Calculate 3D Vibration"
+                        no_f_text = "Click 2-3 fields in tree to add to 3D vibration..."
+
+                    title_lbl = QLabel(title_text)
                     title_lbl.setStyleSheet("font-weight: bold; color: #0d9488; font-size: 11px;")
                     b_layout.addWidget(title_lbl)
 
@@ -1136,7 +1299,7 @@ class SidebarWidget(QWidget):
                     f_layout.setSpacing(6)
 
                     if not builder.norm_operands:
-                        no_f_lbl = QLabel("Click fields in tree to add to norm...")
+                        no_f_lbl = QLabel(no_f_text)
                         no_f_lbl.setStyleSheet("color: #a3a3a3; font-style: italic; font-size: 11px;")
                         f_layout.addWidget(no_f_lbl)
 
@@ -1186,9 +1349,9 @@ class SidebarWidget(QWidget):
                     ctrl_layout.setContentsMargins(0, 2, 0, 2)
                     ctrl_layout.setSpacing(6)
 
-                    combo_op = CleanComboBox(font_size="10px", min_width="48px", max_width="65px", padding="1px 14px 1px 4px")
-                    combo_op.addItems(["+", "-", "*", "/", "norm", "wrap_180", "wrap_360", "rad2deg", "deg2rad", "ang_sub"])
-                    combo_op.setCurrentText("norm")
+                    combo_op = CleanComboBox(font_size="10px", min_width="48px", max_width="75px", padding="1px 14px 1px 4px")
+                    combo_op.addItems(["+", "-", "*", "/", "norm", "vibe_mag", "wrap_180", "wrap_360", "rad2deg", "deg2rad", "vibe", "ang_sub"])
+                    combo_op.setCurrentText(builder.operator)
                     combo_op.currentTextChanged.connect(lambda text, c=c_idx: self.on_operator_combo_changed(c, text))
                     ctrl_layout.addWidget(combo_op)
 
@@ -1197,7 +1360,7 @@ class SidebarWidget(QWidget):
                     btn_cancel.clicked.connect(lambda _, c=c_idx: self.cancel_inline_builder(c))
                     ctrl_layout.addWidget(btn_cancel)
 
-                    btn_ok = QPushButton("✓ Calculate Norm")
+                    btn_ok = QPushButton(btn_ok_text)
                     btn_ok.setStyleSheet("background: #0d9488; color: #ffffff; font-weight: bold; border: none; border-radius: 4px; padding: 4px 12px; font-size: 11px;")
                     btn_ok.clicked.connect(lambda _, c=c_idx: self.execute_inline_calc(c))
                     ctrl_layout.addWidget(btn_ok, stretch=1)
@@ -1233,8 +1396,8 @@ class SidebarWidget(QWidget):
                     expr_layout.addWidget(self.current_btn_op_a, stretch=1)
 
                     # Object 2: Beautified Compact Operator Dropdown
-                    combo_op = CleanComboBox(font_size="10px", min_width="48px", max_width="65px", padding="1px 14px 1px 4px")
-                    combo_op.addItems(["+", "-", "*", "/", "norm", "wrap_180", "wrap_360", "rad2deg", "deg2rad", "ang_sub"])
+                    combo_op = CleanComboBox(font_size="10px", min_width="48px", max_width="75px", padding="1px 14px 1px 4px")
+                    combo_op.addItems(["+", "-", "*", "/", "norm", "vibe_mag", "wrap_180", "wrap_360", "rad2deg", "deg2rad", "vibe", "ang_sub"])
                     combo_op.setCurrentText(builder.operator)
                     combo_op.currentTextChanged.connect(lambda text, c=c_idx: self.on_operator_combo_changed(c, text))
                     expr_layout.addWidget(combo_op)
@@ -1284,3 +1447,8 @@ class SidebarWidget(QWidget):
         color = QColorDialog.getColor(QColor(current_color), self, f"Select Color for {expr_name}")
         if color.isValid():
             self.chart_store.set_expression_color(chart_idx, expr_name, color.name())
+
+    def pick_xy_pair_color(self, chart_idx: int, pair_idx: int, current_color: str):
+        color = QColorDialog.getColor(QColor(current_color), self, "Select XY Scatter Color")
+        if color.isValid():
+            self.chart_store.set_xy_pair_color(chart_idx, pair_idx, color.name())

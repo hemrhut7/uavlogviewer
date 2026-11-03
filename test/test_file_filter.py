@@ -30,3 +30,5 @@ class TestFileFilter(unittest.TestCase):
         # Verify that *.BIN is supported in the filter string
         self.assertIn("*.BIN", file_filter, "File filter should explicitly support uppercase *.BIN for Linux/case-sensitive systems")
         self.assertIn("*.bin", file_filter, "File filter should support lowercase *.bin")
+        self.assertIn("*.csv", file_filter, "File filter should support lowercase *.csv")
+        self.assertIn("*.CSV", file_filter, "File filter should explicitly support uppercase *.CSV for Linux/case-sensitive systems")
