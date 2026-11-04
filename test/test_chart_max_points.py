@@ -77,5 +77,19 @@ class TestChartMaxPoints(unittest.TestCase):
         html = generate_plotly_html(self.log, self.chart_store)
         self.assertIn("#123456", html)
 
+    def test_scatter_partial_fields_x_only(self):
+        cs = ChartStore()
+        cs.add_xy_chart("ATT.Roll", "")
+        html = generate_plotly_html(self.log, cs)
+        self.assertIn("ATT.Roll", html)
+        self.assertIn("XY Scatter", html)
+
+    def test_scatter_partial_fields_y_only(self):
+        cs = ChartStore()
+        cs.add_xy_chart("", "ATT.Roll")
+        html = generate_plotly_html(self.log, cs)
+        self.assertIn("ATT.Roll", html)
+        self.assertIn("XY Scatter", html)
+
 if __name__ == "__main__":
     unittest.main()

@@ -108,7 +108,7 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
     active_charts = [
         c for c in chart_store.charts
         if (c.chart_type == "timeseries" and len(c.expressions) > 0) or
-           (c.chart_type == "scatter" and (c.x_field != "" or c.y_field != ""))
+           (c.chart_type == "scatter" and any(p.x_field != "" or p.y_field != "" for p in c.pairs))
     ]
 
     if not active_charts:
@@ -142,7 +142,7 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
             specs.append([{"secondary_y": True}])
             row_heights.append(1.0)
             row_heights.append(0.20) # 0.2x height compact timeline
-            titles.append(f"XY Scatter: {chart.y_field} vs {chart.x_field}")
+            titles.append(f"XY Scatter: {chart.y_field or 'None'} vs {chart.x_field or 'None'}")
             titles.append("") # No title for bound timeline
             row_counter += 2
         else:
@@ -191,6 +191,9 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                 if x_key: last_x_key = x_key
                 if y_key: last_y_key = y_key
 
+                x_t_arr, x_y_arr = np.array([]), np.array([])
+                y_t_arr, y_y_arr = np.array([]), np.array([])
+
                 if x_key:
                     x_t_arr, x_y_arr = get_series_data_and_timestamps(parsed_log, x_key)
                     x_t_arr, x_y_arr = filter_by_segment(x_t_arr, x_y_arr, parsed_log, chart_store.segment_filter)
@@ -199,6 +202,7 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                     y_t_arr, y_y_arr = get_series_data_and_timestamps(parsed_log, y_key)
                     y_t_arr, y_y_arr = filter_by_segment(y_t_arr, y_y_arr, parsed_log, chart_store.segment_filter)
 
+                # Top Row: WebGL Accelerated XY Scatter Plot (Y vs X) - requires both X and Y
                 if len(x_y_arr) > 0 and len(y_y_arr) > 0:
                     # 1. Filter top XY Scatter plot by visible_range if specified
                     if visible_range and len(visible_range) == 2 and visible_range[0] is not None and visible_range[1] is not None:
@@ -235,7 +239,6 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                         else:
                             scat_x, scat_y, scat_t = final_x, final_y, final_t
 
-                        # Top Row: WebGL Accelerated XY Scatter Plot (Y vs X)
                         fig.add_trace(
                             go.Scattergl(
                                 x=scat_x,
@@ -252,11 +255,9 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                             secondary_y=False
                         )
 
-                    # Downsample timeline if > 5000 points
+                # Bottom Row: Bound Compact Timeline Chart (X(t) and Y(t) vs Time)
+                if len(x_y_arr) > 0:
                     step_x = max(1, len(x_t_arr) // 5000) if len(x_t_arr) > 5000 else 1
-                    step_y = max(1, len(y_t_arr) // 5000) if len(y_t_arr) > 5000 else 1
-
-                    # Bottom Row: Bound Compact Timeline Chart (X(t) and Y(t) vs Time)
                     fig.add_trace(
                         go.Scattergl(
                             x=x_t_arr[::step_x],
@@ -271,20 +272,21 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                         secondary_y=False
                     )
 
-                    if y_key != x_key:
-                        fig.add_trace(
-                            go.Scattergl(
-                                x=y_t_arr[::step_y],
-                                y=y_y_arr[::step_y],
-                                mode='lines',
-                                name=f"{y_key}",
-                                line=dict(color=pair_color, width=1.5, dash='dash'),
-                                hovertemplate=f"<b>{y_key}</b><br>Time: %{{x:.2f}}s<br>Val: %{{y}}<extra></extra>"
-                            ),
-                            row=r_timeline,
-                            col=1,
-                            secondary_y=True
-                        )
+                if len(y_y_arr) > 0 and (y_key != x_key or len(x_y_arr) == 0):
+                    step_y = max(1, len(y_t_arr) // 5000) if len(y_t_arr) > 5000 else 1
+                    fig.add_trace(
+                        go.Scattergl(
+                            x=y_t_arr[::step_y],
+                            y=y_y_arr[::step_y],
+                            mode='lines',
+                            name=f"{y_key}",
+                            line=dict(color=pair_color, width=1.5, dash='dash'),
+                            hovertemplate=f"<b>{y_key}</b><br>Time: %{{x:.2f}}s<br>Val: %{{y}}<extra></extra>"
+                        ),
+                        row=r_timeline,
+                        col=1,
+                        secondary_y=True
+                    )
 
             fig.update_xaxes(title_text=f"X: {last_x_key or 'None'}", showticklabels=True, row=r_scatter, col=1)
             fig.update_yaxes(title_text=f"Y: {last_y_key or 'None'}", secondary_y=False, row=r_scatter, col=1)
