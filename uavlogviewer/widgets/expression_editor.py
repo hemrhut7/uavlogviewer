@@ -75,21 +75,15 @@ class ExpressionEditorDialog(QDialog):
 
             # Determine primary timestamps from the first input variable used
             primary_timestamps = None
-            for key in matching_keys:
-                mtype = key.split('.')[0]
-                if mtype in self.parsed_log.timestamps:
-                    primary_timestamps = self.parsed_log.timestamps[mtype]
+            candidates = [k.split('.')[0] for k in matching_keys] + ["ATT", "POS", "GPS", "BARO", "IMU"]
+            for cand in candidates:
+                if cand in self.parsed_log.timestamps:
+                    primary_timestamps = self.parsed_log.timestamps[cand]
                     break
-            if primary_timestamps is None:
-                for cand in ["ATT", "POS", "GPS", "BARO", "IMU"]:
-                    if cand in self.parsed_log.timestamps:
-                        primary_timestamps = self.parsed_log.timestamps[cand]
-                        break
             if primary_timestamps is None and len(self.parsed_log.timestamps) > 0:
-                try:
-                    primary_timestamps = next(iter(self.parsed_log.timestamps.values()))
-                except StopIteration:
-                    primary_timestamps = np.array([])
+                first_key = next(iter(self.parsed_log.timestamps.keys()), None)
+                if first_key is not None:
+                    primary_timestamps = self.parsed_log.timestamps.get(first_key, np.array([]))
             if primary_timestamps is None:
                 primary_timestamps = np.array([])
 
@@ -100,8 +94,10 @@ class ExpressionEditorDialog(QDialog):
                     primary_timestamps = np.arange(ref_len, dtype=np.float64)
 
             # Store calculated series in parsed_log
-            msg_group = channel_name.split('.')[0] if '.' in channel_name else "CALC"
-            field_name = channel_name.split('.')[1] if '.' in channel_name else channel_name
+            if '.' in channel_name:
+                msg_group, field_name = channel_name.split('.', 1)
+            else:
+                msg_group, field_name = "CALC", channel_name
             full_key = f"{msg_group}.{field_name}"
 
             if msg_group not in self.parsed_log.field_tree:

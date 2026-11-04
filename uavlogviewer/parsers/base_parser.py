@@ -149,8 +149,7 @@ class LazyTimeSeriesDict(dict):
     def _trigger_load(self, key: str):
         if not self.loader or not isinstance(key, str):
             return
-        mtype = key.split('.')[0] if '.' in key else key
-        base_mtype = mtype.split('[')[0]
+        base_mtype = key.split('.', 1)[0].split('[', 1)[0]
         if base_mtype in self._loading_types:
             return
         self._loading_types.add(base_mtype)
@@ -175,15 +174,13 @@ class LazyTimeSeriesDict(dict):
     def __contains__(self, key: object) -> bool:
         if super().__contains__(key):
             return True
-        if isinstance(key, str) and self.parsed_log and self.parsed_log.field_tree:
-            if '.' in key:
-                mtype, f = key.split('.', 1)
-                base_mtype = mtype.split('[')[0]
-                if mtype in self.parsed_log.field_tree and f in self.parsed_log.field_tree[mtype]:
-                    return True
-                if base_mtype in self.parsed_log.field_tree and f in self.parsed_log.field_tree[base_mtype]:
-                    return True
-        return False
+        if not isinstance(key, str) or '.' not in key or not (self.parsed_log and self.parsed_log.field_tree):
+            return False
+        mtype, f = key.split('.', 1)
+        base_mtype = mtype.split('[', 1)[0]
+        tree = self.parsed_log.field_tree
+        fields = tree.get(mtype) or tree.get(base_mtype)
+        return fields is not None and f in fields
 
     def __len__(self) -> int:
         if not self.parsed_log or not self.parsed_log.field_tree:
@@ -215,8 +212,7 @@ class LazyTimestampsDict(dict):
     def _trigger_load(self, key: str):
         if not self.loader or not isinstance(key, str):
             return
-        mtype = key.split('.')[0] if '.' in key else key
-        base_mtype = mtype.split('[')[0]
+        base_mtype = key.split('.', 1)[0].split('[', 1)[0]
         if base_mtype in self._loading_types:
             return
         self._loading_types.add(base_mtype)

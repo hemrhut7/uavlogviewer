@@ -203,29 +203,37 @@ class PlotContainer(QWidget):
         if not title.startswith("RANGE:") or not self.parsed_log:
             return
 
-        has_scatter = any(c.chart_type == "scatter" for c in self.chart_store.charts)
+        new_range: Optional[tuple[float, float]] = None
+        if title != "RANGE:RESET":
+            parts = title.split(":")
+            if len(parts) == 3:
+                try:
+                    new_range = (float(parts[1]), float(parts[2]))
+                except ValueError:
+                    return
+            else:
+                return
 
-        parts = title.split(":")
-        if len(parts) == 3 and parts[1] != "RESET":
-            try:
-                x0, x1 = float(parts[1]), float(parts[2])
-                self.current_visible_range = (x0, x1)
-                self.update_stats_for_range(x0, x1)
-                if has_scatter:
-                    self._scatter_reload_timer.start()
-            except ValueError:
-                pass
-        elif "RESET" in title:
-            self.current_visible_range = None
-            self.update_stats_for_range(None, None)
-            if has_scatter:
-                self._scatter_reload_timer.start()
+        self.current_visible_range = new_range
+        x0, x1 = new_range if new_range else (None, None)
+        self.update_stats_for_range(x0, x1)
+
+        has_scatter = any(
+            c.chart_type == "scatter" and any(p.x_field != "" or p.y_field != "" for p in c.pairs)
+            for c in self.chart_store.charts
+        )
+        if has_scatter:
+            self._scatter_reload_timer.start()
 
     def update_stats_for_range(self, x0: Optional[float] = None, x1: Optional[float] = None):
         if not self.parsed_log:
             return
 
-        active_charts = [c for c in self.chart_store.charts if len(c.expressions) > 0]
+        active_charts = [
+            c for c in self.chart_store.charts
+            if (c.chart_type == "timeseries" and len(c.expressions) > 0) or
+               (c.chart_type == "scatter" and any(p.x_field != "" or p.y_field != "" for p in c.pairs))
+        ]
         if not active_charts:
             self.stats_box.setTitle("📊 [No Fields Plotted]")
             self.stats_table.setRowCount(0)
@@ -237,29 +245,39 @@ class PlotContainer(QWidget):
         table_rows = []
 
         for c_idx, chart in enumerate(active_charts):
-            for expr in chart.expressions:
-                field_key = expr.name
+            if chart.chart_type == "scatter":
+                chart_fields = []
+                for p in chart.pairs:
+                    if p.x_field and p.x_field not in chart_fields:
+                        chart_fields.append(p.x_field)
+                    if p.y_field and p.y_field not in chart_fields:
+                        chart_fields.append(p.y_field)
+            else:
+                chart_fields = [expr.name for expr in chart.expressions]
+
+            for field_key in chart_fields:
                 t_arr, y_arr = get_series_data_and_timestamps(self.parsed_log, field_key)
                 if len(y_arr) == 0:
                     continue
                 t_arr, y_arr = filter_by_segment(t_arr, y_arr, self.parsed_log, self.chart_store.segment_filter)
 
-                if x0 is not None and x1 is not None and len(t_arr) > 0:
+                if x0 is not None and x1 is not None:
+                    if len(t_arr) == 0:
+                        continue
                     i0 = int(np.searchsorted(t_arr, x0, side='left'))
                     i1 = int(np.searchsorted(t_arr, x1, side='right'))
-                    if i0 < i1:
-                        y_sub = y_arr[i0:i1]
-                        ymin, ymax = float(np.nanmin(y_sub)), float(np.nanmax(y_sub))
-                        ymean = float(np.nanmean(y_sub))
-                        ystd = float(np.nanstd(y_sub))
-                        ylast = float(y_sub[-1])
-                    else:
+                    if i0 >= i1:
                         continue
+                    y_stats = y_arr[i0:i1]
                 else:
-                    ymin, ymax = float(np.nanmin(y_arr)), float(np.nanmax(y_arr))
-                    ymean = float(np.nanmean(y_arr))
-                    ystd = float(np.nanstd(y_arr))
-                    ylast = float(y_arr[-1]) if len(y_arr) > 0 else 0.0
+                    if len(y_arr) == 0:
+                        continue
+                    y_stats = y_arr
+
+                ymin, ymax = float(np.nanmin(y_stats)), float(np.nanmax(y_stats))
+                ymean = float(np.nanmean(y_stats))
+                ystd = float(np.nanstd(y_stats))
+                ylast = float(y_stats[-1])
 
                 table_rows.append((
                     f"Chart #{c_idx + 1}",

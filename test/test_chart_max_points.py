@@ -91,5 +91,26 @@ class TestChartMaxPoints(unittest.TestCase):
         self.assertIn("ATT.Roll", html)
         self.assertIn("XY Scatter", html)
 
+    def test_hovermode_active_when_downsampled(self):
+        # 30,000 raw points, downsampled to 10,000 max_points -> should keep hover enabled
+        t = np.linspace(0, 100, 30000)
+        self.log.timestamps["ATT"] = t
+        self.log.time_series["ATT.Roll"] = np.sin(t)
+        cs = ChartStore()
+        cs.add_expression(0, "ATT.Roll")
+        html = generate_plotly_html(self.log, cs)
+        self.assertIn('"hovermode":"xunified"', html.replace(' ', ''))
+
+    def test_hovermode_disabled_when_dense_render(self):
+        # 30,000 raw points with max_points=50,000 -> rendered > 25,000 -> should disable hover
+        t = np.linspace(0, 100, 30000)
+        self.log.timestamps["ATT"] = t
+        self.log.time_series["ATT.Roll"] = np.sin(t)
+        cs = ChartStore()
+        cs.set_chart_max_points(0, 50000)
+        cs.add_expression(0, "ATT.Roll")
+        html = generate_plotly_html(self.log, cs)
+        self.assertIn('"hovermode":false', html.replace(' ', ''))
+
 if __name__ == "__main__":
     unittest.main()

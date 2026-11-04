@@ -55,7 +55,6 @@ def filter_by_segment(t_arr: np.ndarray, y_arr: np.ndarray, parsed_log: ParsedLo
         i1 = int(np.searchsorted(t_arr, target_seg.end_time, side='right'))
         if i0 < i1:
             return t_arr[i0:i1], y_arr[i0:i1]
-        return t_arr, y_arr
 
     return t_arr, y_arr
 
@@ -113,6 +112,13 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
 
     if not active_charts:
         return "<html><body style='background-color:#fafafa;'></body></html>"
+
+    valid_range = (
+        (float(visible_range[0]), float(visible_range[1]))
+        if (visible_range and len(visible_range) == 2 and visible_range[0] is not None and visible_range[1] is not None)
+        else None
+    )
+    has_dense_trace = False
 
     active_seg_bounds = None
     if chart_store.segment_filter != "all":
@@ -205,8 +211,8 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                 # Top Row: WebGL Accelerated XY Scatter Plot (Y vs X) - requires both X and Y
                 if len(x_y_arr) > 0 and len(y_y_arr) > 0:
                     # 1. Filter top XY Scatter plot by visible_range if specified
-                    if visible_range and len(visible_range) == 2 and visible_range[0] is not None and visible_range[1] is not None:
-                        x0, x1 = visible_range
+                    if valid_range:
+                        x0, x1 = valid_range
                         i_x0 = int(np.searchsorted(x_t_arr, x0, side='left'))
                         i_x1 = int(np.searchsorted(x_t_arr, x1, side='right'))
                         x_t_sub, x_y_sub = x_t_arr[i_x0:i_x1], x_y_arr[i_x0:i_x1]
@@ -257,7 +263,7 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
 
                 # Bottom Row: Bound Compact Timeline Chart (X(t) and Y(t) vs Time)
                 if len(x_y_arr) > 0:
-                    step_x = max(1, len(x_t_arr) // 5000) if len(x_t_arr) > 5000 else 1
+                    step_x = max(1, math.ceil(len(x_t_arr) / 5000)) if len(x_t_arr) > 5000 else 1
                     fig.add_trace(
                         go.Scattergl(
                             x=x_t_arr[::step_x],
@@ -273,7 +279,7 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                     )
 
                 if len(y_y_arr) > 0 and (y_key != x_key or len(x_y_arr) == 0):
-                    step_y = max(1, len(y_t_arr) // 5000) if len(y_t_arr) > 5000 else 1
+                    step_y = max(1, math.ceil(len(y_t_arr) / 5000)) if len(y_t_arr) > 5000 else 1
                     fig.add_trace(
                         go.Scattergl(
                             x=y_t_arr[::step_y],
@@ -299,8 +305,8 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
             fig.update_yaxes(showticklabels=False, title_text="", showgrid=False, zeroline=False, row=r_timeline, col=1, secondary_y=True)
             
             # Persist timeline range if visible_range is active so it doesn't snap back to full range!
-            if visible_range and len(visible_range) == 2 and visible_range[0] is not None and visible_range[1] is not None:
-                fig.update_xaxes(range=[visible_range[0], visible_range[1]], title_text="Time (seconds)", showticklabels=True, row=r_timeline, col=1)
+            if valid_range:
+                fig.update_xaxes(range=[valid_range[0], valid_range[1]], title_text="Time (seconds)", showticklabels=True, row=r_timeline, col=1)
             elif active_seg_bounds:
                 fig.update_xaxes(range=[active_seg_bounds[0], active_seg_bounds[1]], title_text="Time (seconds)", showticklabels=True, row=r_timeline, col=1)
             else:
@@ -333,7 +339,10 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                 # Downsample if max_points > 0 and len > max_points (0 for Unlimited / full resolution)
                 max_pts = getattr(chart, 'max_points', 10000)
                 step_ts = max(1, math.ceil(len(t_arr) / max_pts)) if (max_pts > 0 and len(t_arr) > max_pts) else 1
-                is_dense = (max_pts == 0 or len(t_arr) > 25000)
+                pts_rendered = len(t_arr) if max_pts == 0 else math.ceil(len(t_arr) / step_ts)
+                is_dense = (max_pts == 0 or pts_rendered > 25000)
+                if is_dense:
+                    has_dense_trace = True
 
                 fig.add_trace(
                     go.Scattergl(
@@ -356,8 +365,8 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
             fig.update_yaxes(title_text=label1, secondary_y=False, row=r_ts, col=1)
             fig.update_yaxes(title_text=label2, secondary_y=True, row=r_ts, col=1)
 
-            if visible_range and len(visible_range) == 2 and visible_range[0] is not None and visible_range[1] is not None:
-                fig.update_xaxes(range=[visible_range[0], visible_range[1]], showticklabels=(not chart_store.sync_zoom or r_ts == total_rows), row=r_ts, col=1)
+            if valid_range:
+                fig.update_xaxes(range=[valid_range[0], valid_range[1]], showticklabels=(not chart_store.sync_zoom or r_ts == total_rows), row=r_ts, col=1)
             elif active_seg_bounds:
                 fig.update_xaxes(range=[active_seg_bounds[0], active_seg_bounds[1]], showticklabels=(not chart_store.sync_zoom or r_ts == total_rows), title_text="Time (seconds)", row=r_ts, col=1)
             elif chart_store.sync_zoom and r_ts < total_rows:
@@ -402,7 +411,7 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
         template="plotly_white",
         paper_bgcolor="#fafafa",
         plot_bgcolor="#ffffff",
-        hovermode=False if has_unlimited_or_large else ("closest" if has_scatter else "x unified"),
+        hovermode=False if (has_unlimited_or_large or has_dense_trace) else ("closest" if has_scatter else "x unified"),
         autosize=True,
         margin=dict(l=50, r=50, t=30, b=40),
         legend=dict(
@@ -452,15 +461,12 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
             if (gd && gd.on) {{
                 clearInterval(checkPlot);
                 // Ensure all WebGL subplots immediately resize and render on load
-                setTimeout(function() {{
+                var resizePlot = function() {{
                     if (window.Plotly && gd) {{ Plotly.Plots.resize(gd); }}
-                }}, 50);
-                setTimeout(function() {{
-                    if (window.Plotly && gd) {{ Plotly.Plots.resize(gd); }}
-                }}, 250);
-                window.addEventListener('resize', function() {{
-                    if (window.Plotly && gd) {{ Plotly.Plots.resize(gd); }}
-                }});
+                }};
+                setTimeout(resizePlot, 50);
+                setTimeout(resizePlot, 250);
+                window.addEventListener('resize', resizePlot);
 
                 gd.on('plotly_relayout', function(eventdata) {{
                     clearTimeout(relayoutTimer);
