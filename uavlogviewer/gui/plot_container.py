@@ -84,7 +84,11 @@ class PlotContainer(QWidget):
 
         self.stats_table = QTableWidget(0, 7)
         self.stats_table.setHorizontalHeaderLabels(["Chart", "Telemetry Field", "Min", "Max", "Mean", "STD", "Last Value"])
-        self.stats_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        header = self.stats_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        for c in range(2, 7):
+            header.setSectionResizeMode(c, QHeaderView.ResizeToContents)
         self.stats_table.verticalHeader().setVisible(False)
         self.stats_table.setAlternatingRowColors(True)
 
@@ -299,8 +303,8 @@ class PlotContainer(QWidget):
                 disp_name = self.session.display_name(field_key, lid) if self.session else field_key
 
                 table_rows.append((
-                    f"Chart #{c_idx + 1}",
-                    disp_name,
+                    f"#{c_idx + 1}",
+                    field_key,
                     f"{ymin:.4f}",
                     f"{ymax:.4f}",
                     f"{ymean:.4f}",
