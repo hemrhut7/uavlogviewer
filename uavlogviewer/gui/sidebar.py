@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QTabWidget, QCheckBox, QScrollArea, QFrame, QRadioButton, QMessageBox, QDialog,
                                QMenu, QInputDialog, QDoubleSpinBox)
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QPalette, QCursor
+from PySide6.QtGui import QColor, QPalette, QCursor, QGuiApplication
 from typing import Dict, List, Optional
 from uavlogviewer.parsers.base_parser import ParsedLog, format_data_rate
 from uavlogviewer.models.log_session import LogSession, LoadedLog, MAX_LOGS
@@ -110,6 +110,8 @@ class SidebarWidget(QWidget):
 
     def __init__(self, chart_store: ChartStore, parent=None):
         super().__init__(parent)
+        if hasattr(QGuiApplication.styleHints(), 'setContextMenuTrigger'):
+            QGuiApplication.styleHints().setContextMenuTrigger(Qt.ContextMenuTrigger.Release)
         self.setAcceptDrops(True)
         self.chart_store = chart_store
         self.active_chart_idx = 0
@@ -629,12 +631,24 @@ class SidebarWidget(QWidget):
         chart = self.chart_store.charts[target_idx]
 
         menu = QMenu(self)
-        if chart.chart_type == "timeseries" and self.session and self.session.is_multi:
-            action_all = menu.addAction("➕ 加入所有檔案的此欄位 (Add for all logs)")
-            action_all.triggered.connect(lambda: self.add_field_for_all_logs(target_idx, field_key))
 
-        if not menu.isEmpty():
-            menu.exec_(self.tree.viewport().mapToGlobal(pos))
+        # Disabled header action prevents accidental click on mouse-up on Linux
+        header = menu.addAction(f"📊 {field_key}")
+        header.setEnabled(False)
+        menu.addSeparator()
+
+        if chart.chart_type == "timeseries":
+            # Action 1: Add for currently active log
+            active_label = self.session.active_log.label if self.session and self.session.active_log else "F1"
+            act_single = menu.addAction(f"➕ 加入此欄位至目前圖表 [{active_label}]")
+            act_single.triggered.connect(lambda: self.on_field_selected_for_calc(field_key))
+
+            # Action 2: Add for all logs (if multi-log session)
+            if self.session and self.session.is_multi:
+                action_all = menu.addAction("➕ 加入所有檔案的此欄位 (Add for all logs)")
+                action_all.triggered.connect(lambda: self.add_field_for_all_logs(target_idx, field_key))
+
+        menu.exec_(QCursor.pos())
 
     def add_field_for_all_logs(self, chart_idx: int, field_key: str):
         if not self.session:
@@ -654,7 +668,16 @@ class SidebarWidget(QWidget):
     def show_xy_pair_context_menu(self, pos, chart_idx: int, pair_idx: int):
         if not self.session or not self.session.is_multi:
             return
+        chart = self.chart_store.charts[chart_idx]
+        if not (0 <= pair_idx < len(chart.pairs)):
+            return
+        pair = chart.pairs[pair_idx]
+
         menu = QMenu(self)
+        header = menu.addAction(f"📈 Pair: {pair.x_field} vs {pair.y_field}")
+        header.setEnabled(False)
+        menu.addSeparator()
+
         act = menu.addAction("👯 為所有檔案複製此 pair (Duplicate for all logs)")
         act.triggered.connect(lambda: self.duplicate_pair_for_all_logs(chart_idx, pair_idx))
         menu.exec_(QCursor.pos())

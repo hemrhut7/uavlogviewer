@@ -12,6 +12,7 @@ os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS",
                       "--enable-gpu-rasterization --ignore-gpu-blocklist --enable-zero-copy")
 
 from PySide6.QtCore import Qt, QCoreApplication
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 from uavlogviewer.gui.main_window import MainWindow
 
@@ -19,6 +20,10 @@ def main():
     QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
     app = QApplication(sys.argv)
     app.setApplicationName("UAV Log Viewer")
+    
+    # Configure context menu trigger to Release instead of Press (prevents instant activation on mouse-up on Linux)
+    if hasattr(QGuiApplication.styleHints(), 'setContextMenuTrigger'):
+        QGuiApplication.styleHints().setContextMenuTrigger(Qt.ContextMenuTrigger.Release)
     
     window = MainWindow()
     window.show()

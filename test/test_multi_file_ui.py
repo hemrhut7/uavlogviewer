@@ -117,3 +117,27 @@ class TestMultiFileUI(unittest.TestCase):
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
+
+    @patch("uavlogviewer.gui.sidebar.QMenu.exec_")
+    def test_tree_context_menu_options(self, mock_exec):
+        l1 = self.window.session.add_log(self.log1, "/fake/flight1.bin")
+        l2 = self.window.session.add_log(self.log2, "/fake/flight2.bin")
+        self.window.sidebar.populate_field_tree(self.log1)
+        self.window.show()
+
+        # Find and expand ATT item in tree
+        tree = self.window.sidebar.tree
+        att_item = None
+        for i in range(tree.topLevelItemCount()):
+            top = tree.topLevelItem(i)
+            if top.text(0).startswith("ATT"):
+                top.setExpanded(True)
+                for j in range(top.childCount()):
+                    if top.child(j).text(0) == "Roll":
+                        att_item = top.child(j)
+                        break
+
+        self.assertIsNotNone(att_item)
+        rect = tree.visualItemRect(att_item)
+        self.window.sidebar.show_tree_context_menu(rect.center())
+        mock_exec.assert_called_once()
