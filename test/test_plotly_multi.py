@@ -51,3 +51,17 @@ class TestPlotlyMulti(unittest.TestCase):
         # Since zero_align is auto (active for multi-log), shifted timestamps should both be near 0..10
         # Check that flight mode background is shifted (starts at 0.0 rather than 100.0)
         self.assertIn("AUTO", html)
+
+
+def test_get_series_missing_lazy_key_returns_empty():
+    """Key listed in field_tree but with no loadable data must not raise KeyError."""
+    import numpy as np
+    from uavlogviewer.parsers.base_parser import ParsedLog, LazyTimeSeriesDict
+    from uavlogviewer.tools.plotly_exporter import get_series_data_and_timestamps
+
+    log = ParsedLog(filename="x.bin", log_type="dataflash")
+    log.field_tree = {"ARSP": ["DiffPress"]}
+    log.time_series = LazyTimeSeriesDict(log, loader=lambda mtype: None)
+    assert "ARSP.DiffPress" in log.time_series
+    t, y = get_series_data_and_timestamps(log, "ARSP.DiffPress")
+    assert len(t) == 0 and len(y) == 0

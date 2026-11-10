@@ -140,8 +140,12 @@ class DataflashParser(BaseParser):
                     unique_insts = []
                     if inst_col is not None and inst_idx >= 0:
                         s = struct.Struct(fmt.msg_struct)
-                        step = max(1, len(offsets) // 200)
-                        sample_offsets = offsets[::step][:200]
+                        # Sample a contiguous head block (instances are usually interleaved: 0,1,0,1...)
+                        # plus an odd-stride sweep over the whole log. A plain even stride aliases with
+                        # the interleaving period and can miss every non-zero instance.
+                        n_total = len(offsets)
+                        step = max(1, n_total // 400) | 1
+                        sample_offsets = list(offsets[:64]) + list(offsets[::step][:400])
                         sample_vals = []
                         for ofs in sample_offsets:
                             ofs_int = int(ofs)
@@ -245,6 +249,15 @@ class DataflashParser(BaseParser):
                         break
 
             if inst_col is not None:
+                # The header scan only samples ~200 rows, so it may have listed this type as a flat
+                # (non-instanced) entry while the full data turns out to have several instances.
+                # In that case also alias the flat keys to the primary (largest) instance so that
+                # fields already shown in the field tree / plotted charts stay resolvable.
+                tree_is_flat = (
+                    base_mtype in parsed.field_tree
+                    and not any(k.startswith(f"{base_mtype}[") for k in parsed.field_tree)
+                )
+                primary = None  # (n_samples, t_arr, {field: values})
                 unique_insts = df[inst_col].unique()
                 for inst_val in unique_insts:
                     sub_df = df[df[inst_col] == inst_val]
@@ -271,9 +284,19 @@ class DataflashParser(BaseParser):
                     if sub_mtype not in parsed.field_tree:
                         parsed.field_tree[sub_mtype] = fields
 
+                    field_vals = {}
                     for f in fields:
                         key = f"{sub_mtype}.{f}"
-                        parsed.time_series[key] = sub_df[f].to_numpy()
+                        arr = sub_df[f].to_numpy()
+                        parsed.time_series[key] = arr
+                        field_vals[f] = arr
+                    if primary is None or len(t_arr) > primary[0]:
+                        primary = (len(t_arr), t_arr, field_vals)
+
+                if tree_is_flat and primary is not None:
+                    parsed.timestamps[base_mtype] = primary[1]
+                    for f, arr in primary[2].items():
+                        parsed.time_series[f"{base_mtype}.{f}"] = arr
             else:
                 if time_col:
                     t_arr = df[time_col].to_numpy(dtype=np.float64)

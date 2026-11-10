@@ -121,7 +121,12 @@ def get_series_data_and_timestamps(parsed_log: ParsedLog, key: str) -> tuple:
     if not real_key:
         return np.array([]), np.array([])
 
-    y_arr = sanitize_array(parsed_log.time_series[real_key])
+    # `in` may report True for keys that are only listed in field_tree (lazy loading); the actual
+    # lazy unpack can still yield no data (e.g. empty message type), so fetch via .get() and guard.
+    y_raw = parsed_log.time_series.get(real_key)
+    if y_raw is None:
+        return np.array([]), np.array([])
+    y_arr = sanitize_array(y_raw)
     t_arr = parsed_log.timestamps.get(
         real_key,
         parsed_log.timestamps.get(
