@@ -231,3 +231,30 @@ class TestLoadedLogsCards(unittest.TestCase):
             self.window.session.set_user_offset(self.l1.log_id, 2.0)
             self._wait(200)
             self.assertGreaterEqual(m.call_count, 1)
+
+
+class TestClearAllButton(unittest.TestCase):
+    def test_clear_all_button_clears_chart(self):
+        from PySide6.QtWidgets import QPushButton
+        window = MainWindow()
+        log = ParsedLog(filename="f.bin", log_type="dataflash")
+        t = np.linspace(0.0, 10.0, 20)
+        log.timestamps["ATT"] = t
+        log.time_series["ATT.Roll"] = np.sin(t)
+        log.time_series["ATT.Pitch"] = np.cos(t)
+        log.field_tree = {"ATT": ["Roll", "Pitch"]}
+        window.session.add_log(log, "/fake/f.bin")
+        window.chart_store.add_expression(0, "ATT.Roll", log_id=window.session.active_log_id)
+        window.chart_store.add_expression(0, "ATT.Pitch", log_id=window.session.active_log_id)
+        window.sidebar.rebuild_setup_panel()
+        self.assertEqual(len(window.chart_store.charts[0].expressions), 2)
+
+        from PySide6.QtCore import QCoreApplication, QEvent
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        btns = [b for b in window.sidebar.findChildren(QPushButton) if b.text() == "Clear All"]
+        self.assertEqual(len(btns), 1)
+        self.assertTrue(btns[0].isEnabled())
+        btns[0].click()
+        self.assertEqual(len(window.chart_store.charts[0].expressions), 0)
+        window.close_all_logs()
+        window.close()

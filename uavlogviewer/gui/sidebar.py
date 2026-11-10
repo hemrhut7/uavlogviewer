@@ -1938,11 +1938,30 @@ class SidebarWidget(QWidget):
                     b_layout.addWidget(action_row)
                     card_layout.addWidget(b_card)
             else:
-                # Math Calculation Button at the bottom of each Chart card
+                # Math Calculation Button + Clear All at the bottom of each Chart card
+                bottom_row = QHBoxLayout()
+                bottom_row.setSpacing(6)
+                bottom_row.setContentsMargins(0, 4, 0, 0)
+
                 btn_calc = QPushButton(f"🧮 Calculate Data for Chart #{c_idx + 1}")
-                btn_calc.setStyleSheet("background-color: #fafafa; color: #0d9488; border: 1px solid #0d9488; font-weight: bold; font-size: 11px; padding: 4px; border-radius: 4px; margin-top: 4px;")
+                btn_calc.setStyleSheet("background-color: #fafafa; color: #0d9488; border: 1px solid #0d9488; font-weight: bold; font-size: 11px; padding: 4px; border-radius: 4px;")
                 btn_calc.clicked.connect(lambda _, idx=c_idx: self.start_inline_builder(idx))
-                card_layout.addWidget(btn_calc)
+                bottom_row.addWidget(btn_calc, stretch=1)
+
+                btn_clear_all = QPushButton("Clear All")
+                btn_clear_all.setToolTip(f"關閉 Chart #{c_idx + 1} 上所有已繪製的 message / 欄位")
+                btn_clear_all.setEnabled(bool(chart.expressions))
+                btn_clear_all.setStyleSheet(
+                    "QPushButton { background-color: #f1f5f9; color: #334155; font-weight: bold; font-size: 11px; "
+                    "padding: 4px 10px; border-radius: 4px; border: 1px solid #cbd5e1; }"
+                    "QPushButton:hover { background-color: #e2e8f0; border-color: #94a3b8; }"
+                    "QPushButton:pressed { background-color: #cbd5e1; }"
+                    "QPushButton:disabled { background-color: #f8fafc; color: #cbd5e1; border-color: #e2e8f0; }"
+                )
+                btn_clear_all.clicked.connect(lambda _, idx=c_idx: self.chart_store.clear_chart(idx))
+                bottom_row.addWidget(btn_clear_all)
+
+                card_layout.addLayout(bottom_row)
 
             self.setup_content_layout.addWidget(card)
 

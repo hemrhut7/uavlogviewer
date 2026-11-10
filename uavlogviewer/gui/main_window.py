@@ -193,11 +193,11 @@ class MainWindow(QMainWindow):
         is_parsing_active = self.worker is not None and self.worker.isRunning()
         if self.session.logs and not is_cli and not is_parsing_active:
             msg_box = QMessageBox(self)
-            msg_box.setWindowTitle("載入日誌檔案 (Load Log Files)")
+            msg_box.setWindowTitle("Load Log Files")
             msg_box.setText("目前已有載入的日誌檔案，請問要追加載入或是取代全部？")
-            btn_append = msg_box.addButton("追加 (Append)", QMessageBox.AcceptRole)
-            btn_replace = msg_box.addButton("取代全部 (Replace All)", QMessageBox.DestructiveRole)
-            btn_cancel = msg_box.addButton("取消 (Cancel)", QMessageBox.RejectRole)
+            btn_append = msg_box.addButton("Append", QMessageBox.AcceptRole)
+            btn_replace = msg_box.addButton("Replace All", QMessageBox.DestructiveRole)
+            btn_cancel = msg_box.addButton("Cancel", QMessageBox.RejectRole)
             msg_box.setDefaultButton(btn_append)
             msg_box.exec_()
 
@@ -250,7 +250,7 @@ class MainWindow(QMainWindow):
                 self.progress_dialog.close()
                 self.progress_dialog = None
             count = len(self.session.logs)
-            self.status_bar.showMessage(f"已成功載入 {count} 個日誌檔案。")
+            self.status_bar.showMessage(f" {count} logs are loaded")
             return
 
         self._parse_index += 1
