@@ -29,6 +29,22 @@ def compute_t_first(parsed_log: ParsedLog) -> float:
     return min_t if min_t is not None else 0.0
 
 
+def compute_t_last(parsed_log: ParsedLog) -> float:
+    """Computes the latest valid timestamp across all time series in a parsed log."""
+    if not parsed_log or not parsed_log.timestamps:
+        return 0.0
+
+    max_t = None
+    for arr in parsed_log.timestamps.values():
+        if isinstance(arr, (list, np.ndarray)) and len(arr) > 0:
+            last_val = float(arr[-1])
+            if np.isfinite(last_val):
+                if max_t is None or last_val > max_t:
+                    max_t = last_val
+
+    return max_t if max_t is not None else 0.0
+
+
 @dataclass
 class LoadedLog:
     log_id: int
@@ -37,11 +53,17 @@ class LoadedLog:
     parsed: ParsedLog
     t_first: float
     user_offset: float = 0.0
+    t_last: float = 0.0
+
+    @property
+    def duration(self) -> float:
+        return max(0.0, self.t_last - self.t_first)
 
 
 class LogSession(QObject):
     changed = Signal()
     active_changed = Signal(int)
+    offsets_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -86,7 +108,16 @@ class LogSession(QObject):
         l = self.get(log_id)
         if l is not None and abs(l.user_offset - offset) > 1e-9:
             l.user_offset = float(offset)
-            self.changed.emit()
+            self.offsets_changed.emit()
+
+    def reset_all_offsets(self):
+        any_changed = False
+        for l in self.logs:
+            if abs(l.user_offset) > 1e-9:
+                l.user_offset = 0.0
+                any_changed = True
+        if any_changed:
+            self.offsets_changed.emit()
 
     def set_active(self, log_id: int):
         if self.active_log_id != log_id and any(l.log_id == log_id for l in self.logs):
@@ -130,7 +161,8 @@ class LogSession(QObject):
             filepath=filepath,
             parsed=parsed,
             t_first=t_first,
-            user_offset=0.0
+            user_offset=0.0,
+            t_last=compute_t_last(parsed)
         )
         self.logs.append(loaded)
 

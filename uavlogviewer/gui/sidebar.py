@@ -6,13 +6,14 @@ editable Object 3, phase-unwrapped angle subtraction (ang_sub) with norm_ang(180
 
 Dependencies: PySide6, numpy, chart_store.
 """
+import os
 import numpy as np
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QLineEdit, QTreeWidget, QTreeWidgetItem, QLabel,
                                QFileDialog, QGroupBox, QColorDialog, QComboBox, QListView,
                                QTabWidget, QCheckBox, QScrollArea, QFrame, QRadioButton, QMessageBox, QDialog,
                                QMenu, QInputDialog, QDoubleSpinBox)
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QColor, QPalette, QCursor, QGuiApplication
 from typing import Dict, List, Optional
 from uavlogviewer.parsers.base_parser import ParsedLog, format_data_rate
@@ -95,6 +96,144 @@ class FocusLineEdit(QLineEdit):
         super().focusInEvent(event)
         self.focused.emit()
 
+
+class OffsetSpinBox(QDoubleSpinBox):
+    """Button-less spinbox: Up/Down keys adjust, wheel only adjusts when focused (else scrolls the list)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setButtonSymbols(QDoubleSpinBox.NoButtons)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+    def wheelEvent(self, event):
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
+
+# Fixed per-file color palette (F1..F8) used for Loaded Logs cards
+LOG_CARD_COLORS = [
+    "#0d9488", "#f97316", "#6366f1", "#e11d48",
+    "#65a30d", "#0ea5e9", "#a855f7", "#ca8a04",
+]
+OFFSET_DEBOUNCE_MS = 300
+
+
+class LogCard(QFrame):
+    """Two-row card for one loaded log: [Fn] filename ✕ / Offset spin + reset + time info."""
+    activate_requested = Signal(int)
+    close_requested = Signal(int)
+    offset_committed = Signal(int, float)
+
+    def __init__(self, loaded: LoadedLog, parent=None):
+        super().__init__(parent)
+        self.log_id = loaded.log_id
+        self.setObjectName("logCard")
+        try:
+            idx = int(loaded.label[1:]) - 1
+        except ValueError:
+            idx = 0
+        self.color = LOG_CARD_COLORS[idx % len(LOG_CARD_COLORS)]
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(6, 4, 6, 4)
+        lay.setSpacing(3)
+
+        # Row 1: badge + filename + close
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
+        self.badge = QLabel(f" {loaded.label} ")
+        self.badge.setStyleSheet(
+            f"background: {self.color}; color: #ffffff; font-weight: bold; "
+            "border-radius: 3px; font-size: 11px; border: none;"
+        )
+        row1.addWidget(self.badge)
+
+        fn = loaded.parsed.filename if loaded.parsed else os.path.basename(loaded.filepath)
+        self.lbl_name = QLabel(truncate_text(fn, max_len=30))
+        self.lbl_name.setToolTip(f"{loaded.filepath}\n(t_first: {loaded.t_first:.2f}s)")
+        self.lbl_name.setStyleSheet("color: #1e293b; font-weight: bold; font-size: 11px; border: none;")
+        row1.addWidget(self.lbl_name, stretch=1)
+
+        self.btn_del = QPushButton("✕")
+        self.btn_del.setToolTip(f"關閉日誌 [{loaded.label}]")
+        self.btn_del.setStyleSheet(
+            "background: transparent; color: #ef4444; font-weight: bold; font-size: 11px; "
+            "border: none; padding: 2px 4px;"
+        )
+        self.btn_del.clicked.connect(lambda: self.close_requested.emit(self.log_id))
+        row1.addWidget(self.btn_del)
+        lay.addLayout(row1)
+
+        # Row 2: offset + reset + time info
+        row2 = QHBoxLayout()
+        row2.setSpacing(4)
+        lbl_ofs = QLabel("Offset")
+        lbl_ofs.setStyleSheet("color: #64748b; font-size: 10px; border: none;")
+        row2.addWidget(lbl_ofs)
+
+        self.spin = OffsetSpinBox()
+        self.spin.setRange(-1000000.0, 1000000.0)
+        self.spin.setDecimals(2)
+        self.spin.setSingleStep(0.1)
+        self.spin.setSuffix(" s")
+        self.spin.setValue(loaded.user_offset)
+        self.spin.setStyleSheet(
+            "QDoubleSpinBox { font-size: 11px; color: #0f172a; background: #f1f5f9; "
+            "border: 1px solid transparent; border-radius: 4px; padding: 2px 6px; }"
+            "QDoubleSpinBox:hover { background: #e2e8f0; }"
+            f"QDoubleSpinBox:focus {{ background: #ffffff; border: 1px solid {self.color}; }}"
+        )
+        self.spin.setFixedWidth(80)
+        self.spin.setToolTip("Offset (秒)：點選後以滾輪或鍵盤 ↑↓ 微調，或直接輸入數字；停止操作約 0.3 秒後套用")
+        row2.addWidget(self.spin)
+
+        self.btn_reset = QPushButton("↺")
+        self.btn_reset.setToolTip("重設此檔案 Offset 為 0")
+        self.btn_reset.setFixedWidth(24)
+        self.btn_reset.setStyleSheet(
+            "background: #f1f5f9; color: #475569; font-weight: bold; font-size: 12px; "
+            "border: 1px solid #cbd5e1; border-radius: 3px; padding: 1px;"
+        )
+        self.btn_reset.clicked.connect(lambda: self.spin.setValue(0.0))
+        row2.addWidget(self.btn_reset)
+        row2.addStretch()
+
+        self.lbl_info = QLabel(f"{loaded.t_first:.1f}~{loaded.t_last:.1f}s ({loaded.duration:.1f}s)")
+        self.lbl_info.setToolTip("日誌時間範圍 (原始時間戳) 與總時長")
+        self.lbl_info.setStyleSheet("color: #64748b; font-size: 10px; border: none;")
+        row2.addWidget(self.lbl_info)
+        lay.addLayout(row2)
+
+        # Debounced commit of offset edits
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(OFFSET_DEBOUNCE_MS)
+        self._timer.timeout.connect(lambda: self.offset_committed.emit(self.log_id, self.spin.value()))
+        self.spin.valueChanged.connect(lambda _v: self._timer.start())
+
+        self.set_active(False)
+
+    def set_active(self, active: bool):
+        border = f"2px solid {self.color}" if active else "1px solid #e2e8f0"
+        bg = "#f0fdfa" if active else "#ffffff"
+        self.setStyleSheet(
+            f"#logCard {{ background: {bg}; border: {border}; border-radius: 5px; }}"
+        )
+
+    def set_offset_silently(self, value: float):
+        if abs(self.spin.value() - value) > 1e-9:
+            self.spin.blockSignals(True)
+            self.spin.setValue(value)
+            self.spin.blockSignals(False)
+
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+        self.activate_requested.emit(self.log_id)
+
+
 class SidebarWidget(QWidget):
     file_opened = Signal(str)
     files_opened = Signal(list)
@@ -117,7 +256,9 @@ class SidebarWidget(QWidget):
         self.active_chart_idx = 0
         self.session: Optional[LogSession] = None
         self.parsed_log: Optional[ParsedLog] = None
-
+        self._log_cards: Dict[int, LogCard] = {}
+        self._card_ids: tuple = ()
+        self._populated_log_count: int = 0
         self.current_btn_op_a: Optional[QPushButton] = None
         self.current_input_op_b: Optional[FocusLineEdit] = None
 
@@ -165,14 +306,15 @@ class SidebarWidget(QWidget):
         home_layout.addWidget(drop_box)
 
         # Loaded Logs Management Card
-        self.logs_box = QGroupBox("Loaded Logs (已載入檔案清單)")
+        self.logs_box = QGroupBox("Loaded Logs")
         self.logs_box_layout = QVBoxLayout(self.logs_box)
         self.logs_box_layout.setContentsMargins(6, 8, 6, 8)
         self.logs_box_layout.setSpacing(6)
 
         self.logs_scroll = QScrollArea()
         self.logs_scroll.setWidgetResizable(True)
-        self.logs_scroll.setMaximumHeight(180)
+        self.logs_scroll.setMinimumHeight(120)
+        self.logs_scroll.setMaximumHeight(320)
         self.logs_scroll.setStyleSheet("background-color: #fafafa; border: 1px solid #e5e5e5; border-radius: 4px;")
         self.logs_container = QWidget()
         self.logs_container_layout = QVBoxLayout(self.logs_container)
@@ -194,8 +336,24 @@ class SidebarWidget(QWidget):
         session_ctrl_layout.addWidget(self.chk_zero_align)
         session_ctrl_layout.addStretch()
 
+        self.btn_reset_offsets = QPushButton("重設 Offset")
+        self.btn_reset_offsets.setToolTip("將所有檔案的時間位移 (Offset) 重設為 0")
+        self.btn_reset_offsets.setStyleSheet(
+            "QPushButton { background-color: #f1f5f9; color: #334155; font-weight: bold; padding: 3px 8px; "
+            "border-radius: 4px; font-size: 10px; border: 1px solid #cbd5e1; }"
+            "QPushButton:hover { background-color: #e2e8f0; border-color: #94a3b8; }"
+            "QPushButton:pressed { background-color: #cbd5e1; }"
+        )
+        self.btn_reset_offsets.clicked.connect(self.on_reset_all_offsets)
+        session_ctrl_layout.addWidget(self.btn_reset_offsets)
+
         self.btn_close_all = QPushButton("關閉全部")
-        self.btn_close_all.setStyleSheet("background-color: #ef4444; color: #ffffff; font-weight: bold; padding: 3px 8px; border-radius: 4px; font-size: 10px; border: none;")
+        self.btn_close_all.setStyleSheet(
+            "QPushButton { background-color: #f1f5f9; color: #334155; font-weight: bold; padding: 3px 8px; "
+            "border-radius: 4px; font-size: 10px; border: 1px solid #cbd5e1; }"
+            "QPushButton:hover { background-color: #e2e8f0; border-color: #94a3b8; }"
+            "QPushButton:pressed { background-color: #cbd5e1; }"
+        )
         self.btn_close_all.clicked.connect(self.close_all_requested.emit)
         session_ctrl_layout.addWidget(self.btn_close_all)
         self.logs_box_layout.addLayout(session_ctrl_layout)
@@ -524,6 +682,7 @@ class SidebarWidget(QWidget):
         self.session = session
         self.session.changed.connect(self.on_session_changed)
         self.session.active_changed.connect(self.on_active_log_changed)
+        self.session.offsets_changed.connect(self.on_offsets_changed)
         if self.session.active_log and self.session.active_log.parsed:
             self.populate_field_tree(self.session.active_log.parsed)
         else:
@@ -531,12 +690,36 @@ class SidebarWidget(QWidget):
 
     def on_session_changed(self):
         self.update_loaded_logs_list()
-        if self.session and self.session.active_log and self.session.active_log.parsed:
-            self.populate_field_tree(self.session.active_log.parsed)
+        active = self.session.active_log if self.session else None
+        # Only rebuild the field tree when the displayed log differs from the active one or the number
+        # of logs changed (never switch tabs here: offset / zero-align / active changes keep the user on Home)
+        if active and active.parsed and (
+            active.parsed is not self.parsed_log
+            or len(self.session.logs) != self._populated_log_count
+        ):
+            self.populate_field_tree(active.parsed)
 
     def on_active_log_changed(self, log_id: int):
-        if self.session and self.session.active_log and self.session.active_log.parsed:
-            self.populate_field_tree(self.session.active_log.parsed)
+        active = self.session.active_log if self.session else None
+        if active and active.parsed and active.parsed is not self.parsed_log:
+            self.populate_field_tree(active.parsed)
+
+    def on_offsets_changed(self):
+        """Sync card spinboxes with session offsets without rebuilding any widget."""
+        if not self.session:
+            return
+        for loaded in self.session.logs:
+            card = self._log_cards.get(loaded.log_id)
+            if card:
+                card.set_offset_silently(loaded.user_offset)
+
+    def on_reset_all_offsets(self):
+        if self.session:
+            self.session.reset_all_offsets()
+
+    def on_card_offset_committed(self, log_id: int, value: float):
+        if self.session:
+            self.session.set_user_offset(log_id, value)
 
     def on_zero_align_toggled(self, checked: bool):
         if self.session:
@@ -556,68 +739,45 @@ class SidebarWidget(QWidget):
         if not hasattr(self, 'logs_container_layout'):
             return
 
-        while self.logs_container_layout.count() > 0:
-            child = self.logs_container_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-
         if hasattr(self, 'chk_zero_align') and self.session:
             self.chk_zero_align.blockSignals(True)
             self.chk_zero_align.setChecked(self.session.zero_align_enabled)
             self.chk_zero_align.blockSignals(False)
 
-        if not self.session or not self.session.logs:
+        log_ids = tuple(l.log_id for l in self.session.logs) if self.session else ()
+        active_id = self.session.active_log.log_id if self.session and self.session.active_log else None
+
+        # Incremental update: same set of logs -> just refresh highlight / offsets (keeps spinbox focus)
+        if log_ids and log_ids == self._card_ids:
+            for lid, card in self._log_cards.items():
+                card.set_active(lid == active_id)
+            self.on_offsets_changed()
+            return
+
+        # Structural change -> rebuild all cards
+        self._log_cards = {}
+        self._card_ids = log_ids
+        while self.logs_container_layout.count() > 0:
+            child = self.logs_container_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        if not log_ids:
             empty_lbl = QLabel("無已載入日誌 (請由上方選取檔案)")
             empty_lbl.setStyleSheet("color: #94a3b8; font-style: italic; font-size: 11px; padding: 4px;")
             self.logs_container_layout.addWidget(empty_lbl)
+            self.logs_container_layout.addStretch()
             return
 
         for loaded in self.session.logs:
-            row = QFrame()
-            row.setStyleSheet("""
-                QFrame {
-                    background: #ffffff;
-                    border: 1px solid #e2e8f0;
-                    border-radius: 4px;
-                    padding: 2px;
-                }
-            """)
-            r_lay = QHBoxLayout(row)
-            r_lay.setContentsMargins(4, 2, 4, 2)
-            r_lay.setSpacing(6)
-
-            badge = QLabel(f" {loaded.label} ")
-            badge.setStyleSheet("background: #ccfbf1; color: #0f766e; font-weight: bold; border-radius: 3px; font-size: 11px;")
-            r_lay.addWidget(badge)
-
-            fn = loaded.parsed.filename if loaded.parsed else os.path.basename(loaded.filepath)
-            fn_lbl = QLabel(truncate_text(fn, max_len=18))
-            fn_lbl.setToolTip(f"{loaded.filepath}\n(t_first: {loaded.t_first:.2f}s)")
-            fn_lbl.setStyleSheet("color: #1e293b; font-weight: bold; font-size: 11px;")
-            r_lay.addWidget(fn_lbl, stretch=1)
-
-            lbl_ofs = QLabel("Offset:")
-            lbl_ofs.setStyleSheet("color: #64748b; font-size: 10px;")
-            r_lay.addWidget(lbl_ofs)
-
-            spin = QDoubleSpinBox()
-            spin.setRange(-1000000.0, 1000000.0)
-            spin.setDecimals(2)
-            spin.setSingleStep(0.1)
-            spin.setSuffix("s")
-            spin.setValue(loaded.user_offset)
-            spin.setStyleSheet("font-size: 10px; max-width: 65px; background: #f8fafc;")
-            spin.setToolTip("手動調整此檔案的時間軸位移 (秒)")
-            spin.valueChanged.connect(lambda val, lid=loaded.log_id: self.session.set_user_offset(lid, val))
-            r_lay.addWidget(spin)
-
-            btn_del = QPushButton("✕")
-            btn_del.setToolTip(f"關閉日誌 [{loaded.label}]")
-            btn_del.setStyleSheet("background: transparent; color: #ef4444; font-weight: bold; font-size: 11px; border: none; padding: 2px 4px;")
-            btn_del.clicked.connect(lambda _, lid=loaded.log_id: self.log_close_requested.emit(lid))
-            r_lay.addWidget(btn_del)
-
-            self.logs_container_layout.addWidget(row)
+            card = LogCard(loaded)
+            card.set_active(loaded.log_id == active_id)
+            card.activate_requested.connect(self.session.set_active)
+            card.close_requested.connect(self.log_close_requested.emit)
+            card.offset_committed.connect(self.on_card_offset_committed)
+            self._log_cards[loaded.log_id] = card
+            self.logs_container_layout.addWidget(card)
+        self.logs_container_layout.addStretch()
 
     def show_tree_context_menu(self, pos):
         item = self.tree.itemAt(pos)
@@ -701,7 +861,7 @@ class SidebarWidget(QWidget):
         if target_lids:
             self.chart_store.duplicate_pair_for_logs(chart_idx, pair_idx, target_lids)
 
-    def populate_field_tree(self, parsed_log: ParsedLog):
+    def populate_field_tree(self, parsed_log: ParsedLog, switch_to_plot: bool = False):
         if self.session is None:
             self.session = LogSession.from_parsed_log(parsed_log)
 
@@ -717,7 +877,8 @@ class SidebarWidget(QWidget):
         self.lbl_filename.setText(f"📄 {parsed_log.filename}")
         self.lbl_filename.setStyleSheet("color: #0d9488; font-weight: bold;")
         self.update_log_summary(parsed_log)
-        self.nav_tabs.setCurrentIndex(1)
+        if switch_to_plot:
+            self.nav_tabs.setCurrentIndex(1)
         self.tree.blockSignals(True)
         self.tree.clear()
 
@@ -806,6 +967,7 @@ class SidebarWidget(QWidget):
             self.chart_store.segment_filter = "all"
 
         self.cmb_segment.blockSignals(False)
+        self._populated_log_count = len(self.session.logs) if self.session else 0
         self.update_loaded_logs_list()
         self.rebuild_setup_panel()
 

@@ -141,3 +141,93 @@ class TestMultiFileUI(unittest.TestCase):
         rect = tree.visualItemRect(att_item)
         self.window.sidebar.show_tree_context_menu(rect.center())
         mock_exec.assert_called_once()
+
+
+class TestLoadedLogsCards(unittest.TestCase):
+    def setUp(self):
+        self.window = MainWindow()
+        self.log1 = ParsedLog(filename="flight1.bin", log_type="dataflash")
+        t1 = np.linspace(100.0, 110.0, 50)
+        self.log1.timestamps["ATT"] = t1
+        self.log1.time_series["ATT.Roll"] = np.sin(t1)
+        self.log1.field_tree = {"ATT": ["Roll"]}
+        self.log2 = ParsedLog(filename="flight2.bin", log_type="dataflash")
+        t2 = np.linspace(200.0, 215.0, 50)
+        self.log2.timestamps["ATT"] = t2
+        self.log2.time_series["ATT.Roll"] = np.cos(t2)
+        self.log2.field_tree = {"ATT": ["Roll"]}
+        self.l1 = self.window.session.add_log(self.log1, "/fake/flight1.bin")
+        self.l2 = self.window.session.add_log(self.log2, "/fake/flight2.bin")
+        self.window.sidebar.nav_tabs.setCurrentIndex(0)
+
+    def tearDown(self):
+        self.window.close_all_logs()
+        self.window.close()
+
+    def _wait(self, ms):
+        import time
+        end = time.time() + ms / 1000.0
+        while time.time() < end:
+            app.processEvents()
+            time.sleep(0.01)
+
+    def test_duration_computed(self):
+        self.assertAlmostEqual(self.l2.duration, 15.0)
+
+    def test_offset_change_keeps_home_tab_and_spinbox(self):
+        sb = self.window.sidebar
+        card = sb._log_cards[self.l1.log_id]
+        spin = card.spin
+        spin.setValue(1.5)
+        self._wait(500)
+        self.assertEqual(sb.nav_tabs.currentIndex(), 0)
+        self.assertIs(sb._log_cards[self.l1.log_id], card)
+        self.assertIs(sb._log_cards[self.l1.log_id].spin, spin)
+        self.assertAlmostEqual(self.l1.user_offset, 1.5)
+
+    def test_offset_is_debounced(self):
+        card = self.window.sidebar._log_cards[self.l1.log_id]
+        fired = []
+        self.window.session.offsets_changed.connect(lambda: fired.append(1))
+        for v in (0.1, 0.2, 0.3, 0.4):
+            card.spin.setValue(v)
+        self.assertEqual(len(fired), 0)
+        self._wait(500)
+        self.assertEqual(len(fired), 1)
+        self.assertAlmostEqual(self.l1.user_offset, 0.4)
+
+    def test_reset_all_offsets(self):
+        self.window.session.set_user_offset(self.l1.log_id, 2.0)
+        self.window.session.set_user_offset(self.l2.log_id, -3.0)
+        fired = []
+        self.window.session.offsets_changed.connect(lambda: fired.append(1))
+        self.window.sidebar.btn_reset_offsets.click()
+        self.assertEqual(len(fired), 1)
+        self.assertEqual(self.l1.user_offset, 0.0)
+        self.assertEqual(self.l2.user_offset, 0.0)
+        for card in self.window.sidebar._log_cards.values():
+            self.assertEqual(card.spin.value(), 0.0)
+
+    def test_click_card_sets_active_without_tab_switch(self):
+        sb = self.window.sidebar
+        self.assertEqual(self.window.session.active_log_id, self.l1.log_id)
+        sb._log_cards[self.l2.log_id].activate_requested.emit(self.l2.log_id)
+        self.assertEqual(self.window.session.active_log_id, self.l2.log_id)
+        self.assertEqual(sb.nav_tabs.currentIndex(), 0)
+        self.assertIs(sb.parsed_log, self.log2)
+
+    def test_new_load_still_switches_to_plot_tab(self):
+        sb = self.window.sidebar
+        sb.nav_tabs.setCurrentIndex(0)
+        self.window.on_log_parsed(self.log1)
+        self.assertEqual(sb.nav_tabs.currentIndex(), 1)
+
+    def test_offset_change_triggers_plot_refresh(self):
+        from unittest.mock import patch as _patch
+        pc = self.window.plot_container
+        with _patch.object(pc, "update_plots") as m:
+            pc._session_refresh_timer.timeout.disconnect()
+            pc._session_refresh_timer.timeout.connect(pc.update_plots)
+            self.window.session.set_user_offset(self.l1.log_id, 2.0)
+            self._wait(200)
+            self.assertGreaterEqual(m.call_count, 1)

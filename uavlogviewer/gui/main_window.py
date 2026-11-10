@@ -280,7 +280,7 @@ class MainWindow(QMainWindow):
     @Slot(ParsedLog)
     def on_log_parsed(self, parsed_log: ParsedLog):
         loaded = self.session.add_log(parsed_log, self._current_parsing_file)
-        self.sidebar.populate_field_tree(parsed_log)
+        self.sidebar.populate_field_tree(parsed_log, switch_to_plot=True)
         self.plot_container.update_plots()
         self.status_bar.showMessage(
             f"Loaded [{loaded.label if loaded else '?'}] {parsed_log.filename} successfully."

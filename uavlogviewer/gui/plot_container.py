@@ -120,8 +120,16 @@ class PlotContainer(QWidget):
 
         self.chart_store.updated.connect(self.update_plots)
 
+        # Debounced refresh for session-level changes (offset / zero-align / flight-mode / active log)
+        self._session_refresh_timer = QTimer(self)
+        self._session_refresh_timer.setSingleShot(True)
+        self._session_refresh_timer.setInterval(50)
+        self._session_refresh_timer.timeout.connect(self.update_plots)
+
     def set_session(self, session: LogSession):
         self.session = session
+        session.offsets_changed.connect(self._session_refresh_timer.start)
+        session.changed.connect(self._session_refresh_timer.start)
         self.parsed_log = session.active_log.parsed if session.active_log else None
         self.current_visible_range = None
         self.update_plots()
