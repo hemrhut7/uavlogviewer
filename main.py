@@ -23,11 +23,11 @@ def main():
     window = MainWindow()
     window.show()
 
-    # Optional CLI file argument
+    # Optional CLI file argument(s)
     if len(sys.argv) > 1:
-        log_path = sys.argv[1]
-        if os.path.exists(log_path):
-            window.load_log_file(log_path)
+        log_paths = [arg for arg in sys.argv[1:] if not arg.startswith("-") and os.path.exists(arg)]
+        if log_paths:
+            window.load_log_files(log_paths, is_cli=True)
 
     sys.exit(app.exec())
 

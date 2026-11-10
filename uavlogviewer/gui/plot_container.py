@@ -16,7 +16,13 @@ import numpy as np
 from typing import Optional, List
 from uavlogviewer.parsers.base_parser import ParsedLog
 from uavlogviewer.models.chart_store import ChartStore
-from uavlogviewer.tools.plotly_exporter import generate_plotly_html, filter_by_segment, get_series_data_and_timestamps
+from uavlogviewer.models.log_session import LogSession
+from uavlogviewer.tools.plotly_exporter import (
+    generate_plotly_html,
+    filter_by_segment,
+    get_series_data_and_timestamps,
+    get_aligned_series
+)
 from uavlogviewer.widgets.export_csv_dialog import ExportCsvDialog
 
 class PlotContainer(QWidget):
@@ -100,6 +106,7 @@ class PlotContainer(QWidget):
         self.layout.addWidget(self.stats_box, stretch=1)
 
         self.parsed_log: Optional[ParsedLog] = None
+        self.session: Optional[LogSession] = None
         self.current_visible_range: Optional[tuple] = None
 
         self._scatter_reload_timer = QTimer(self)
@@ -109,8 +116,15 @@ class PlotContainer(QWidget):
 
         self.chart_store.updated.connect(self.update_plots)
 
+    def set_session(self, session: LogSession):
+        self.session = session
+        self.parsed_log = session.active_log.parsed if session.active_log else None
+        self.current_visible_range = None
+        self.update_plots()
+
     def set_parsed_log(self, parsed_log: ParsedLog):
         self.parsed_log = parsed_log
+        self.session = LogSession.from_parsed_log(parsed_log) if parsed_log else None
         self.current_visible_range = None
         self.update_plots()
 
@@ -120,7 +134,7 @@ class PlotContainer(QWidget):
         self.plotly_web_view.setHtml("<html><body style='background-color:#fafafa;'></body></html>")
 
     def update_plots(self):
-        if not self.parsed_log:
+        if not self.session or not self.session.logs:
             self.clear_plots()
             return
 
@@ -135,10 +149,11 @@ class PlotContainer(QWidget):
         self.update_embedded_plotly()
 
     def update_embedded_plotly(self):
-        if not self.parsed_log or not self.chart_store:
+        source = self.session if self.session and self.session.logs else self.parsed_log
+        if not source or not self.chart_store:
             return
 
-        html_str = generate_plotly_html(self.parsed_log, self.chart_store, visible_range=self.current_visible_range)
+        html_str = generate_plotly_html(source, self.chart_store, visible_range=self.current_visible_range)
         
         tmp_dir = os.path.abspath(".agent_scratchpad")
         os.makedirs(tmp_dir, exist_ok=True)
@@ -175,13 +190,15 @@ class PlotContainer(QWidget):
             )
             
     def on_export_csv_clicked(self):
-        if not self.parsed_log:
+        source = self.session if self.session and self.session.logs else self.parsed_log
+        if not source:
             return
         if self.receivers(self.open_export_csv_requested) > 0:
             self.open_export_csv_requested.emit()
         else:
             dialog = ExportCsvDialog(
                 parsed_log=self.parsed_log,
+                session=self.session,
                 chart_store=self.chart_store,
                 visible_range=self.current_visible_range,
                 parent=self
@@ -226,7 +243,8 @@ class PlotContainer(QWidget):
             self._scatter_reload_timer.start()
 
     def update_stats_for_range(self, x0: Optional[float] = None, x1: Optional[float] = None):
-        if not self.parsed_log:
+        source = self.session if self.session and self.session.logs else self.parsed_log
+        if not source:
             return
 
         active_charts = [
@@ -246,20 +264,19 @@ class PlotContainer(QWidget):
 
         for c_idx, chart in enumerate(active_charts):
             if chart.chart_type == "scatter":
-                chart_fields = []
+                chart_items = []
                 for p in chart.pairs:
-                    if p.x_field and p.x_field not in chart_fields:
-                        chart_fields.append(p.x_field)
-                    if p.y_field and p.y_field not in chart_fields:
-                        chart_fields.append(p.y_field)
+                    if p.x_field and (p.x_field, p.log_id) not in chart_items:
+                        chart_items.append((p.x_field, p.log_id))
+                    if p.y_field and (p.y_field, p.log_id) not in chart_items:
+                        chart_items.append((p.y_field, p.log_id))
             else:
-                chart_fields = [expr.name for expr in chart.expressions]
+                chart_items = [(expr.name, expr.log_id) for expr in chart.expressions]
 
-            for field_key in chart_fields:
-                t_arr, y_arr = get_series_data_and_timestamps(self.parsed_log, field_key)
+            for field_key, lid in chart_items:
+                t_arr, y_arr = get_aligned_series(source, field_key, log_id=lid, segment_filter=self.chart_store.segment_filter)
                 if len(y_arr) == 0:
                     continue
-                t_arr, y_arr = filter_by_segment(t_arr, y_arr, self.parsed_log, self.chart_store.segment_filter)
 
                 if x0 is not None and x1 is not None:
                     if len(t_arr) == 0:
@@ -279,9 +296,11 @@ class PlotContainer(QWidget):
                 ystd = float(np.nanstd(y_stats))
                 ylast = float(y_stats[-1])
 
+                disp_name = self.session.display_name(field_key, lid) if self.session else field_key
+
                 table_rows.append((
                     f"Chart #{c_idx + 1}",
-                    field_key,
+                    disp_name,
                     f"{ymin:.4f}",
                     f"{ymax:.4f}",
                     f"{ymean:.4f}",

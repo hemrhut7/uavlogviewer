@@ -9,7 +9,7 @@ Provides flexible options:
 Dependencies: PySide6, pandas, numpy, uavlogviewer.tools.csv_exporter.
 """
 import os
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QGroupBox,
     QRadioButton, QButtonGroup, QFileDialog, QMessageBox, QTreeWidget,
@@ -20,6 +20,7 @@ from PySide6.QtGui import QColor
 
 from uavlogviewer.parsers.base_parser import ParsedLog
 from uavlogviewer.models.chart_store import ChartStore
+from uavlogviewer.models.log_session import LogSession, LoadedLog
 from uavlogviewer.tools.csv_exporter import (
     get_plotted_messages_and_fields,
     get_all_fields_for_messages,
@@ -108,13 +109,26 @@ class ExportCsvDialog(QDialog):
 
     def __init__(
         self,
-        parsed_log: Optional[ParsedLog],
+        parsed_log: Optional[Any],
         chart_store: ChartStore,
         visible_range: Optional[Tuple[float, float]] = None,
+        session: Optional[LogSession] = None,
         parent=None
     ):
         super().__init__(parent)
-        self.parsed_log = parsed_log
+        if session is not None:
+            self.session = session
+            self.parsed_log = self.session.active_log.parsed if self.session.active_log else None
+        elif isinstance(parsed_log, LogSession):
+            self.session = parsed_log
+            self.parsed_log = self.session.active_log.parsed if self.session.active_log else None
+        elif isinstance(parsed_log, ParsedLog):
+            self.session = LogSession.from_parsed_log(parsed_log)
+            self.parsed_log = parsed_log
+        else:
+            self.session = None
+            self.parsed_log = None
+
         self.chart_store = chart_store
         self.visible_range = visible_range
 
@@ -282,7 +296,7 @@ class ExportCsvDialog(QDialog):
 
         try:
             num_rows = export_plotted_data_to_csv(
-                parsed_log=self.parsed_log,
+                parsed_log=self.session or self.parsed_log,
                 chart_store=self.chart_store,
                 filepath=filepath,
                 scope=scope,
@@ -297,11 +311,14 @@ class ExportCsvDialog(QDialog):
             return False
 
     def on_export_clicked(self):
-        if not self.parsed_log:
+        if not self.parsed_log and not self.session:
             return
 
-        base_name = os.path.splitext(os.path.basename(self.parsed_log.filename or "uav_log"))[0]
-        suggested_name = f"{base_name}_plotted_messages.csv"
+        if self.session and self.session.is_multi:
+            suggested_name = f"compare_{len(self.session.logs)}_logs_plotted.csv"
+        else:
+            base_name = os.path.splitext(os.path.basename((self.parsed_log.filename if self.parsed_log else "uav_log")))[0]
+            suggested_name = f"{base_name}_plotted_messages.csv"
 
         filepath, _ = QFileDialog.getSaveFileName(
             self,

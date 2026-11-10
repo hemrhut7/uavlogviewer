@@ -7,11 +7,54 @@ Dependencies: plotly, numpy, chart_store.
 """
 import json
 import math
+from typing import Any, Optional, Tuple
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from uavlogviewer.parsers.base_parser import ParsedLog, detect_segments_from_timestamps
 from uavlogviewer.models.chart_store import ChartStore
+from uavlogviewer.models.log_session import LogSession, LoadedLog
+
+def resolve_session(source: Any) -> Optional[LogSession]:
+    """Resolves either a LogSession or a legacy ParsedLog into a LogSession instance."""
+    if source is None:
+        return None
+    if isinstance(source, LogSession):
+        return source
+    if isinstance(source, ParsedLog):
+        return LogSession.from_parsed_log(source)
+    return None
+
+def get_aligned_series(
+    source: Any,
+    key: str,
+    log_id: Optional[int] = None,
+    segment_filter: str = "all"
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Retrieves (t_aligned, y_arr) for a field, sliced by segment filter and shifted to session aligned time.
+    """
+    session = resolve_session(source)
+    if not session:
+        return np.array([]), np.array([])
+
+    loaded = session.get(log_id)
+    if not loaded or not loaded.parsed:
+        return np.array([]), np.array([])
+
+    t_arr, y_arr = get_series_data_and_timestamps(loaded.parsed, key)
+    if len(y_arr) == 0:
+        return np.array([]), np.array([])
+
+    t_arr, y_arr = filter_by_segment(t_arr, y_arr, loaded.parsed, segment_filter)
+    if len(t_arr) == 0:
+        return t_arr, y_arr
+
+    shift = session.time_shift(loaded.log_id)
+    if abs(shift) > 1e-9:
+        t_arr = t_arr + shift
+
+    return t_arr, y_arr
 
 def truncate_text(text: str, max_len: int = 24) -> str:
     """Truncates text exceeding max_len and appends '...'."""
@@ -91,8 +134,9 @@ def get_series_data_and_timestamps(parsed_log: ParsedLog, key: str) -> tuple:
 
     return t_arr, y_arr
 
-def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible_range: tuple = None) -> str:
-    if not parsed_log or not chart_store or not chart_store.has_any_expressions():
+def generate_plotly_html(parsed_log: Any, chart_store: ChartStore, visible_range: tuple = None) -> str:
+    session = resolve_session(parsed_log)
+    if not session or not chart_store or not chart_store.has_any_expressions():
         return """
         <html>
         <body style='background-color:#fafafa; color:#525252; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align:center; padding-top:100px;'>
@@ -122,17 +166,24 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
 
     active_seg_bounds = None
     if chart_store.segment_filter != "all":
-        primary_segs = parsed_log.get_segments()
-        if primary_segs:
-            target_seg = None
-            if chart_store.segment_filter == "longest":
-                target_seg = next((s for s in primary_segs if s.is_longest), primary_segs[0])
-            elif str(chart_store.segment_filter).isdigit():
-                idx = int(chart_store.segment_filter)
-                if 0 <= idx < len(primary_segs):
-                    target_seg = primary_segs[idx]
-            if target_seg:
-                active_seg_bounds = (target_seg.start_time, target_seg.end_time)
+        if not session.is_multi and str(chart_store.segment_filter).isdigit() and session.active_log and session.active_log.parsed:
+            segs = session.active_log.parsed.get_segments()
+            idx = int(chart_store.segment_filter)
+            if 0 <= idx < len(segs):
+                target_seg = segs[idx]
+                shift = session.time_shift(session.active_log.log_id)
+                active_seg_bounds = (target_seg.start_time + shift, target_seg.end_time + shift)
+        elif chart_store.segment_filter == "longest":
+            bounds_list = []
+            for l in session.logs:
+                if l.parsed:
+                    segs = l.parsed.get_segments()
+                    if segs:
+                        target_seg = next((s for s in segs if s.is_longest), segs[0])
+                        shift = session.time_shift(l.log_id)
+                        bounds_list.append((target_seg.start_time + shift, target_seg.end_time + shift))
+            if bounds_list:
+                active_seg_bounds = (min(b[0] for b in bounds_list), max(b[1] for b in bounds_list))
 
     # Compute row heights, specs, titles, and row mappings
     specs = []
@@ -148,7 +199,9 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
             specs.append([{"secondary_y": True}])
             row_heights.append(1.0)
             row_heights.append(0.20) # 0.2x height compact timeline
-            titles.append(f"XY Scatter: {chart.y_field or 'None'} vs {chart.x_field or 'None'}")
+            disp_y = session.display_name(chart.y_field, chart.pairs[0].log_id if chart.pairs else None) if chart.y_field else 'None'
+            disp_x = session.display_name(chart.x_field, chart.pairs[0].log_id if chart.pairs else None) if chart.x_field else 'None'
+            titles.append(f"XY Scatter: {disp_y} vs {disp_x}")
             titles.append("") # No title for bound timeline
             row_counter += 2
         else:
@@ -190,27 +243,22 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                 x_key = pair.x_field
                 y_key = pair.y_field
                 pair_color = pair.color or '#ea580c'
+                lid = pair.log_id
 
                 if not x_key and not y_key:
                     continue
 
-                if x_key: last_x_key = x_key
-                if y_key: last_y_key = y_key
+                disp_x = session.display_name(x_key, lid) if x_key else ""
+                disp_y = session.display_name(y_key, lid) if y_key else ""
 
-                x_t_arr, x_y_arr = np.array([]), np.array([])
-                y_t_arr, y_y_arr = np.array([]), np.array([])
+                if disp_x: last_x_key = disp_x
+                if disp_y: last_y_key = disp_y
 
-                if x_key:
-                    x_t_arr, x_y_arr = get_series_data_and_timestamps(parsed_log, x_key)
-                    x_t_arr, x_y_arr = filter_by_segment(x_t_arr, x_y_arr, parsed_log, chart_store.segment_filter)
-
-                if y_key:
-                    y_t_arr, y_y_arr = get_series_data_and_timestamps(parsed_log, y_key)
-                    y_t_arr, y_y_arr = filter_by_segment(y_t_arr, y_y_arr, parsed_log, chart_store.segment_filter)
+                x_t_arr, x_y_arr = get_aligned_series(session, x_key, log_id=lid, segment_filter=chart_store.segment_filter) if x_key else (np.array([]), np.array([]))
+                y_t_arr, y_y_arr = get_aligned_series(session, y_key, log_id=lid, segment_filter=chart_store.segment_filter) if y_key else (np.array([]), np.array([]))
 
                 # Top Row: WebGL Accelerated XY Scatter Plot (Y vs X) - requires both X and Y
                 if len(x_y_arr) > 0 and len(y_y_arr) > 0:
-                    # 1. Filter top XY Scatter plot by visible_range if specified
                     if valid_range:
                         x0, x1 = valid_range
                         i_x0 = int(np.searchsorted(x_t_arr, x0, side='left'))
@@ -250,11 +298,11 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                                 x=scat_x,
                                 y=scat_y,
                                 mode='markers+lines',
-                                name=f"{y_key} vs {x_key}",
+                                name=f"{disp_y} vs {disp_x}",
                                 marker=dict(size=4, color=pair_color),
                                 line=dict(color=pair_color, width=1, dash='dot'),
                                 customdata=scat_t,
-                                hovertemplate=f"<b>XY Scatter</b><br>X ({x_key}): %{{x}}<br>Y ({y_key}): %{{y}}<br>Time: %{{customdata:.2f}}s<extra></extra>"
+                                hovertemplate=f"<b>XY Scatter</b><br>X ({disp_x}): %{{x}}<br>Y ({disp_y}): %{{y}}<br>Time: %{{customdata:.2f}}s<extra></extra>"
                             ),
                             row=r_scatter,
                             col=1,
@@ -269,9 +317,9 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                             x=x_t_arr[::step_x],
                             y=x_y_arr[::step_x],
                             mode='lines',
-                            name=f"{x_key}",
+                            name=disp_x,
                             line=dict(color=pair_color, width=1.5),
-                            hovertemplate=f"<b>{x_key}</b><br>Time: %{{x:.2f}}s<br>Val: %{{y}}<extra></extra>"
+                            hovertemplate=f"<b>{disp_x}</b><br>Time: %{{x:.2f}}s<br>Val: %{{y}}<extra></extra>"
                         ),
                         row=r_timeline,
                         col=1,
@@ -285,9 +333,9 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                             x=y_t_arr[::step_y],
                             y=y_y_arr[::step_y],
                             mode='lines',
-                            name=f"{y_key}",
+                            name=disp_y,
                             line=dict(color=pair_color, width=1.5, dash='dash'),
-                            hovertemplate=f"<b>{y_key}</b><br>Time: %{{x:.2f}}s<br>Val: %{{y}}<extra></extra>"
+                            hovertemplate=f"<b>{disp_y}</b><br>Time: %{{x:.2f}}s<br>Val: %{{y}}<extra></extra>"
                         ),
                         row=r_timeline,
                         col=1,
@@ -325,16 +373,17 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
 
             for expr in chart.expressions:
                 field_key = expr.name
-                t_arr, y_arr = get_series_data_and_timestamps(parsed_log, field_key)
+                lid = expr.log_id
+                t_arr, y_arr = get_aligned_series(session, field_key, log_id=lid, segment_filter=chart_store.segment_filter)
                 if len(y_arr) == 0:
                     continue
-                t_arr, y_arr = filter_by_segment(t_arr, y_arr, parsed_log, chart_store.segment_filter)
 
+                disp_name = session.display_name(field_key, lid)
                 use_secondary = (expr.axis == 1)
                 if use_secondary:
-                    axis2_fields.append(field_key)
+                    axis2_fields.append(disp_name)
                 else:
-                    axis1_fields.append(field_key)
+                    axis1_fields.append(disp_name)
 
                 # Downsample if max_points > 0 and len > max_points (0 for Unlimited / full resolution)
                 max_pts = getattr(chart, 'max_points', 10000)
@@ -349,10 +398,10 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
                         x=t_arr[::step_ts],
                         y=y_arr[::step_ts],
                         mode='lines',
-                        name=field_key,
+                        name=disp_name,
                         line=dict(color=expr.color, width=1 if is_dense else 2),
                         hoverinfo='none' if is_dense else 'all',
-                        hovertemplate=None if is_dense else f"<b>{field_key}</b><br>Time: %{{x:.2f}}s<br>Val: %{{y}}<extra></extra>"
+                        hovertemplate=None if is_dense else f"<b>{disp_name}</b><br>Time: %{{x:.2f}}s<br>Val: %{{y}}<extra></extra>"
                     ),
                     row=r_ts,
                     col=1,
@@ -377,18 +426,22 @@ def generate_plotly_html(parsed_log: ParsedLog, chart_store: ChartStore, visible
             if chart_store.sync_zoom and r_ts != first_time_r:
                 fig.update_xaxes(matches=first_match_key, row=r_ts, col=1)
 
-            if parsed_log.flight_modes:
-                spans_to_draw = parsed_log.flight_modes[:100]
+            fm_log = session.flight_mode_log()
+            if fm_log and fm_log.parsed and fm_log.parsed.flight_modes:
+                fm_shift = session.time_shift(fm_log.log_id)
+                spans_to_draw = fm_log.parsed.flight_modes[:100]
                 for span in spans_to_draw:
+                    s_start = span.start_time + fm_shift
+                    s_end = span.end_time + fm_shift
                     if active_seg_bounds:
                         s_min, s_max = active_seg_bounds
-                        if span.end_time < s_min or span.start_time > s_max:
+                        if s_end < s_min or s_start > s_max:
                             continue
-                        v0 = max(span.start_time, s_min)
-                        v1 = min(span.end_time, s_max)
+                        v0 = max(s_start, s_min)
+                        v1 = min(s_end, s_max)
                     else:
-                        v0 = span.start_time
-                        v1 = span.end_time
+                        v0 = s_start
+                        v1 = s_end
 
                     fig.add_vrect(
                         x0=v0,

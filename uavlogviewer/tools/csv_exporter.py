@@ -14,9 +14,12 @@ import numpy as np
 import pandas as pd
 from uavlogviewer.parsers.base_parser import ParsedLog
 from uavlogviewer.models.chart_store import ChartStore
+from uavlogviewer.models.log_session import LogSession
 from uavlogviewer.tools.plotly_exporter import (
     get_series_data_and_timestamps,
-    filter_by_segment
+    filter_by_segment,
+    resolve_session,
+    get_aligned_series
 )
 
 
@@ -77,7 +80,7 @@ def get_all_fields_for_messages(parsed_log: ParsedLog, message_types: List[str])
 
 
 def export_plotted_data_to_dataframe(
-    parsed_log: ParsedLog,
+    parsed_log: Any,
     chart_store: ChartStore,
     scope: str = "plotted_fields",
     time_range: Optional[Tuple[float, float]] = None,
@@ -88,7 +91,7 @@ def export_plotted_data_to_dataframe(
     Constructs a merged pandas DataFrame containing the plotted messages / fields.
 
     Parameters:
-        parsed_log: ParsedLog containing time series data.
+        parsed_log: LogSession or ParsedLog containing time series data.
         chart_store: ChartStore containing active chart panels and expressions.
         scope: "plotted_fields" (default) or "full_messages".
         time_range: Optional (x0, x1) float tuple to slice the exported time range.
@@ -98,38 +101,55 @@ def export_plotted_data_to_dataframe(
     Returns:
         pd.DataFrame with 'timestamp' as the first column, followed by telemetry field columns.
     """
-    if not parsed_log or not chart_store:
+    session = resolve_session(parsed_log)
+    if not session or not chart_store:
         return pd.DataFrame()
 
-    msgs, plotted_fields = get_plotted_messages_and_fields(chart_store)
-    if not plotted_fields:
+    plotted_items = chart_store.get_plotted_items()
+    if not plotted_items:
         return pd.DataFrame()
+
+    # Collect targets: list of (field_name, log_id, col_name)
+    target_items: List[Tuple[str, Optional[int], str]] = []
 
     if scope == "full_messages":
-        target_fields = get_all_fields_for_messages(parsed_log, msgs)
-        # Ensure any custom plotted field (e.g. CALC) is retained
-        for f in plotted_fields:
-            if f not in target_fields:
-                target_fields.append(f)
-    else:
-        target_fields = plotted_fields
+        # Group messages by log_id
+        msgs_by_log: Dict[Optional[int], set] = {}
+        for f, lid in plotted_items:
+            msg = f.split(".")[0]
+            msgs_by_log.setdefault(lid, set()).add(msg)
 
-    if not target_fields:
+        for lid, msgs in msgs_by_log.items():
+            loaded = session.get(lid)
+            if not loaded or not loaded.parsed:
+                continue
+            all_fields = get_all_fields_for_messages(loaded.parsed, list(msgs))
+            # Also keep any custom plotted fields
+            for f, item_lid in plotted_items:
+                if item_lid == lid and f not in all_fields:
+                    all_fields.append(f)
+            for f in all_fields:
+                col_name = f"{loaded.label}.{f}" if session.is_multi else f
+                target_items.append((f, lid, col_name))
+    else:
+        for f, lid in plotted_items:
+            loaded = session.get(lid)
+            lbl = loaded.label if loaded else "F1"
+            col_name = f"{lbl}.{f}" if session.is_multi else f
+            target_items.append((f, lid, col_name))
+
+    if not target_items:
         return pd.DataFrame()
 
     series_dict: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
     valid_t_arrays: List[np.ndarray] = []
 
-    for f in target_fields:
-        t_arr, y_arr = get_series_data_and_timestamps(parsed_log, f)
+    for f, lid, col_name in target_items:
+        t_arr, y_arr = get_aligned_series(session, f, log_id=lid, segment_filter=segment_filter)
         if len(y_arr) == 0:
             continue
 
-        # Apply segment filtering
-        if segment_filter != "all":
-            t_arr, y_arr = filter_by_segment(t_arr, y_arr, parsed_log, segment_filter)
-
-        # Apply visible time range filtering
+        # Apply visible time range filtering (time_range is in aligned time)
         if time_range is not None and len(t_arr) > 0:
             x0, x1 = time_range
             mask = (t_arr >= x0) & (t_arr <= x1)
@@ -137,7 +157,7 @@ def export_plotted_data_to_dataframe(
             y_arr = y_arr[mask]
 
         if len(t_arr) > 0:
-            series_dict[f] = (t_arr, y_arr)
+            series_dict[col_name] = (t_arr, y_arr)
             valid_t_arrays.append(t_arr)
 
     if not series_dict or not valid_t_arrays:
@@ -153,8 +173,8 @@ def export_plotted_data_to_dataframe(
 
     if all_same_t:
         data: Dict[str, Any] = {"timestamp": first_t}
-        for f, (_, y_arr) in series_dict.items():
-            data[f] = y_arr
+        for col_name, (_, y_arr) in series_dict.items():
+            data[col_name] = y_arr
         return pd.DataFrame(data)
 
     # Multi-rate alignment: union of unique sorted timestamps (rounded to 6 decimals / microsecond precision)
@@ -163,11 +183,11 @@ def export_plotted_data_to_dataframe(
     df = pd.DataFrame(index=union_t)
     df.index.name = "timestamp"
 
-    for (f, (t_arr, y_arr)), t_rounded in zip(series_dict.items(), rounded_t_arrays):
+    for (col_name, (t_arr, y_arr)), t_rounded in zip(series_dict.items(), rounded_t_arrays):
         s = pd.Series(y_arr, index=t_rounded)
         if s.index.has_duplicates:
             s = s[~s.index.duplicated(keep="first")]
-        df[f] = s
+        df[col_name] = s
 
     if fill_mode == "ffill":
         df = df.ffill()
@@ -176,7 +196,7 @@ def export_plotted_data_to_dataframe(
 
 
 def export_plotted_data_to_csv(
-    parsed_log: ParsedLog,
+    parsed_log: Any,
     chart_store: ChartStore,
     filepath: str,
     scope: str = "plotted_fields",

@@ -27,11 +27,12 @@ from uavlogviewer.tools.coord_transform import (
 class CoordTransformDialog(QDialog):
     calculation_completed = Signal(str, str, str)  # Emits (res_e_key, res_n_key, res_u_key)
 
-    def __init__(self, parsed_log: ParsedLog, chart_store: ChartStore, target_chart_idx: Optional[int] = None, parent=None):
+    def __init__(self, parsed_log: ParsedLog, chart_store: ChartStore, target_chart_idx: Optional[int] = None, parent=None, log_id: Optional[int] = None):
         super().__init__(parent)
         self.parsed_log = parsed_log
         self.chart_store = chart_store
         self.target_chart_idx = target_chart_idx
+        self.log_id = log_id
 
         self.setWindowTitle("🌐 經緯度座標轉換 (Lat/Lon/Alt -> ENU)")
         self.resize(520, 480)
@@ -244,6 +245,8 @@ class CoordTransformDialog(QDialog):
             if chart.chart_type == "scatter":
                 chart.x_field = res_e_key
                 chart.y_field = res_n_key
+                if chart.pairs and 0 <= chart.active_pair_idx < len(chart.pairs):
+                    chart.pairs[chart.active_pair_idx].log_id = self.log_id
 
         self.calculation_completed.emit(res_e_key, res_n_key, res_u_key)
         QMessageBox.information(

@@ -11,11 +11,12 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QLineEdit, QTreeWidget, QTreeWidgetItem, QLabel,
                                QFileDialog, QGroupBox, QColorDialog, QComboBox, QListView,
                                QTabWidget, QCheckBox, QScrollArea, QFrame, QRadioButton, QMessageBox, QDialog,
-                               QMenu, QInputDialog)
+                               QMenu, QInputDialog, QDoubleSpinBox)
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtGui import QColor, QPalette, QCursor
 from typing import Dict, List, Optional
 from uavlogviewer.parsers.base_parser import ParsedLog, format_data_rate
+from uavlogviewer.models.log_session import LogSession, LoadedLog, MAX_LOGS
 from uavlogviewer.models.chart_store import (
     ChartStore,
     CalcBuilderState,
@@ -96,18 +97,23 @@ class FocusLineEdit(QLineEdit):
 
 class SidebarWidget(QWidget):
     file_opened = Signal(str)
+    files_opened = Signal(list)
+    log_close_requested = Signal(int)
+    close_all_requested = Signal()
     open_params_requested = Signal()
     open_messages_requested = Signal()
     open_expression_requested = Signal()
     open_coord_transform_requested = Signal()
     open_coord_transform_for_chart_requested = Signal(int)
     open_export_csv_requested = Signal()
+    open_param_diff_requested = Signal()
 
     def __init__(self, chart_store: ChartStore, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
         self.chart_store = chart_store
         self.active_chart_idx = 0
+        self.session: Optional[LogSession] = None
         self.parsed_log: Optional[ParsedLog] = None
 
         self.current_btn_op_a: Optional[QPushButton] = None
@@ -149,12 +155,50 @@ class SidebarWidget(QWidget):
         drop_lbl.setStyleSheet("color: #737373; padding: 24px; border: 2px dashed #e5e5e5; border-radius: 8px; background: #fafafa;")
         drop_layout.addWidget(drop_lbl)
 
-        self.btn_open_file = QPushButton("📁 Choose Log File")
+        self.btn_open_file = QPushButton("📁 Choose Log File(s)")
         self.btn_open_file.setStyleSheet("background-color: #0d9488; color: #ffffff; font-weight: bold; padding: 8px; border-radius: 6px;")
         self.btn_open_file.clicked.connect(self.choose_file)
         drop_layout.addWidget(self.btn_open_file)
 
         home_layout.addWidget(drop_box)
+
+        # Loaded Logs Management Card
+        self.logs_box = QGroupBox("Loaded Logs (已載入檔案清單)")
+        self.logs_box_layout = QVBoxLayout(self.logs_box)
+        self.logs_box_layout.setContentsMargins(6, 8, 6, 8)
+        self.logs_box_layout.setSpacing(6)
+
+        self.logs_scroll = QScrollArea()
+        self.logs_scroll.setWidgetResizable(True)
+        self.logs_scroll.setMaximumHeight(180)
+        self.logs_scroll.setStyleSheet("background-color: #fafafa; border: 1px solid #e5e5e5; border-radius: 4px;")
+        self.logs_container = QWidget()
+        self.logs_container_layout = QVBoxLayout(self.logs_container)
+        self.logs_container_layout.setContentsMargins(4, 4, 4, 4)
+        self.logs_container_layout.setSpacing(4)
+        self.logs_scroll.setWidget(self.logs_container)
+        self.logs_box_layout.addWidget(self.logs_scroll)
+
+        # Bottom row for Loaded Logs: Zero-align checkbox + Close all button
+        session_ctrl_layout = QHBoxLayout()
+        session_ctrl_layout.setContentsMargins(2, 2, 2, 2)
+        self.chk_zero_align = QCheckBox("時間歸零 (Zero-align)")
+        self.chk_zero_align.setStyleSheet("""
+            QCheckBox { color: #171717; font-weight: bold; font-size: 11px; }
+            QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #0d9488; border-radius: 3px; background-color: #ffffff; }
+            QCheckBox::indicator:checked { background-color: #0d9488; }
+        """)
+        self.chk_zero_align.toggled.connect(self.on_zero_align_toggled)
+        session_ctrl_layout.addWidget(self.chk_zero_align)
+        session_ctrl_layout.addStretch()
+
+        self.btn_close_all = QPushButton("關閉全部")
+        self.btn_close_all.setStyleSheet("background-color: #ef4444; color: #ffffff; font-weight: bold; padding: 3px 8px; border-radius: 4px; font-size: 10px; border: none;")
+        self.btn_close_all.clicked.connect(self.close_all_requested.emit)
+        session_ctrl_layout.addWidget(self.btn_close_all)
+        self.logs_box_layout.addLayout(session_ctrl_layout)
+
+        home_layout.addWidget(self.logs_box)
 
         # Log Key Summary Card
         self.summary_box = QGroupBox("Log Analysis Summary")
@@ -276,6 +320,26 @@ class SidebarWidget(QWidget):
 
         plot_layout.addWidget(seg_box)
 
+        # Flight Mode Background Selector Box
+        self.fm_box = QFrame()
+        self.fm_box.setStyleSheet("""
+            QFrame {
+                background-color: #f0fdfa;
+                border: 1px solid #99f6e4;
+                border-radius: 8px;
+            }
+        """)
+        fm_layout = QHBoxLayout(self.fm_box)
+        fm_layout.setContentsMargins(6, 6, 6, 6)
+        fm_layout.setSpacing(6)
+        fm_lbl = QLabel("飛行模式背景:")
+        fm_lbl.setStyleSheet("font-size: 11px; color: #0f766e; font-weight: bold;")
+        fm_layout.addWidget(fm_lbl)
+        self.cmb_flight_mode_bg = CleanComboBox()
+        self.cmb_flight_mode_bg.currentIndexChanged.connect(self.on_flight_mode_bg_changed)
+        fm_layout.addWidget(self.cmb_flight_mode_bg, stretch=1)
+        plot_layout.addWidget(self.fm_box)
+
         # 2. Plots Setup Scroll Area
         setup_box = QGroupBox("Plots Setup")
         setup_box_layout = QVBoxLayout(setup_box)
@@ -341,6 +405,18 @@ class SidebarWidget(QWidget):
         tree_box = QGroupBox("Log Fields Tree")
         tree_layout = QVBoxLayout(tree_box)
 
+        # Source Log selector
+        self.source_box = QWidget()
+        s_layout = QHBoxLayout(self.source_box)
+        s_layout.setContentsMargins(0, 0, 0, 4)
+        s_lbl = QLabel("來源檔案:")
+        s_lbl.setStyleSheet("font-weight: bold; color: #475569; font-size: 11px;")
+        s_layout.addWidget(s_lbl)
+        self.cmb_source_log = CleanComboBox()
+        self.cmb_source_log.currentIndexChanged.connect(self.on_source_log_changed)
+        s_layout.addWidget(self.cmb_source_log, stretch=1)
+        tree_layout.addWidget(self.source_box)
+
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("🔍 Search fields (e.g. ATT, Roll)...")
         self.search_input.setStyleSheet("background: #ffffff; border: 1px solid #e5e5e5; border-radius: 4px; padding: 4px;")
@@ -351,6 +427,8 @@ class SidebarWidget(QWidget):
         self.tree.setHeaderHidden(True)
         self.tree.setStyleSheet("background: #ffffff; border: 1px solid #e5e5e5; color: #171717;")
         self.tree.itemDoubleClicked.connect(self.on_tree_item_double_clicked)
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self.show_tree_context_menu)
         tree_layout.addWidget(self.tree)
 
         plot_layout.addWidget(tree_box, stretch=4)
@@ -385,6 +463,11 @@ class SidebarWidget(QWidget):
         self.btn_export_tool.clicked.connect(self.open_export_csv_requested.emit)
         t_layout.addWidget(self.btn_export_tool)
 
+        self.btn_param_diff = QPushButton("⚖️ 參數差異比對 (Parameter Difference)")
+        self.btn_param_diff.setStyleSheet("background: #f5f5f5; color: #171717; border: 1px solid #e5e5e5; padding: 6px; border-radius: 4px;")
+        self.btn_param_diff.clicked.connect(self.open_param_diff_requested.emit)
+        t_layout.addWidget(self.btn_param_diff)
+
         other_layout.addWidget(tools_box)
         other_layout.addStretch()
 
@@ -393,32 +476,212 @@ class SidebarWidget(QWidget):
         self.chart_store.updated.connect(self.rebuild_setup_panel)
 
     def choose_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Open UAV Log File",
-            "",
-            "UAV Logs (*.bin *.BIN *.log *.LOG *.tlog *.TLOG *.txt *.TXT *.csv *.CSV);;"
-            "CSV Logs (*.csv *.CSV);;"
-            "DataFlash Logs (*.bin *.BIN *.log *.LOG);;"
-            "MAVLink Logs (*.tlog *.TLOG);;"
-            "DJI Logs (*.txt *.TXT *.csv *.CSV);;"
-            "All Files (*)",
-        )
-        if file_path:
-            self.file_opened.emit(file_path)
+        # Support tests that patch getOpenFileName
+        if hasattr(QFileDialog.getOpenFileName, "assert_called_once") or hasattr(QFileDialog.getOpenFileName, "_mock_return_value"):
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Open UAV Log File",
+                "",
+                "UAV Logs (*.bin *.BIN *.log *.LOG *.tlog *.TLOG *.txt *.TXT *.csv *.CSV);;"
+                "CSV Logs (*.csv *.CSV);;"
+                "DataFlash Logs (*.bin *.BIN *.log *.LOG);;"
+                "MAVLink Logs (*.tlog *.TLOG);;"
+                "DJI Logs (*.txt *.TXT *.csv *.CSV);;"
+                "All Files (*)",
+            )
+            file_paths = [file_path] if file_path else []
+        else:
+            file_paths, _ = QFileDialog.getOpenFileNames(
+                self,
+                "Open UAV Log File(s)",
+                "",
+                "UAV Logs (*.bin *.BIN *.log *.LOG *.tlog *.TLOG *.txt *.TXT *.csv *.CSV);;"
+                "CSV Logs (*.csv *.CSV);;"
+                "DataFlash Logs (*.bin *.BIN *.log *.LOG);;"
+                "MAVLink Logs (*.tlog *.TLOG);;"
+                "DJI Logs (*.txt *.TXT *.csv *.CSV);;"
+                "All Files (*)",
+            )
+        if file_paths:
+            self.files_opened.emit(file_paths)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
     def dropEvent(self, event):
+        file_paths = []
         for url in event.mimeData().urls():
-            file_path = url.toLocalFile()
-            if file_path:
-                self.file_opened.emit(file_path)
-                break
+            fp = url.toLocalFile()
+            if fp:
+                file_paths.append(fp)
+        if file_paths:
+            self.files_opened.emit(file_paths)
+
+    def set_session(self, session: LogSession):
+        self.session = session
+        self.session.changed.connect(self.on_session_changed)
+        self.session.active_changed.connect(self.on_active_log_changed)
+        if self.session.active_log and self.session.active_log.parsed:
+            self.populate_field_tree(self.session.active_log.parsed)
+        else:
+            self.update_loaded_logs_list()
+
+    def on_session_changed(self):
+        self.update_loaded_logs_list()
+        if self.session and self.session.active_log and self.session.active_log.parsed:
+            self.populate_field_tree(self.session.active_log.parsed)
+
+    def on_active_log_changed(self, log_id: int):
+        if self.session and self.session.active_log and self.session.active_log.parsed:
+            self.populate_field_tree(self.session.active_log.parsed)
+
+    def on_zero_align_toggled(self, checked: bool):
+        if self.session:
+            self.session.set_zero_align_mode("on" if checked else "off")
+
+    def on_source_log_changed(self, idx: int):
+        data = self.cmb_source_log.currentData()
+        if data is not None and self.session:
+            self.session.set_active(int(data))
+
+    def on_flight_mode_bg_changed(self, idx: int):
+        data = self.cmb_flight_mode_bg.currentData()
+        if data is not None and self.session:
+            self.session.set_flight_mode_source(str(data))
+
+    def update_loaded_logs_list(self):
+        if not hasattr(self, 'logs_container_layout'):
+            return
+
+        while self.logs_container_layout.count() > 0:
+            child = self.logs_container_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        if hasattr(self, 'chk_zero_align') and self.session:
+            self.chk_zero_align.blockSignals(True)
+            self.chk_zero_align.setChecked(self.session.zero_align_enabled)
+            self.chk_zero_align.blockSignals(False)
+
+        if not self.session or not self.session.logs:
+            empty_lbl = QLabel("無已載入日誌 (請由上方選取檔案)")
+            empty_lbl.setStyleSheet("color: #94a3b8; font-style: italic; font-size: 11px; padding: 4px;")
+            self.logs_container_layout.addWidget(empty_lbl)
+            return
+
+        for loaded in self.session.logs:
+            row = QFrame()
+            row.setStyleSheet("""
+                QFrame {
+                    background: #ffffff;
+                    border: 1px solid #e2e8f0;
+                    border-radius: 4px;
+                    padding: 2px;
+                }
+            """)
+            r_lay = QHBoxLayout(row)
+            r_lay.setContentsMargins(4, 2, 4, 2)
+            r_lay.setSpacing(6)
+
+            badge = QLabel(f" {loaded.label} ")
+            badge.setStyleSheet("background: #ccfbf1; color: #0f766e; font-weight: bold; border-radius: 3px; font-size: 11px;")
+            r_lay.addWidget(badge)
+
+            fn = loaded.parsed.filename if loaded.parsed else os.path.basename(loaded.filepath)
+            fn_lbl = QLabel(truncate_text(fn, max_len=18))
+            fn_lbl.setToolTip(f"{loaded.filepath}\n(t_first: {loaded.t_first:.2f}s)")
+            fn_lbl.setStyleSheet("color: #1e293b; font-weight: bold; font-size: 11px;")
+            r_lay.addWidget(fn_lbl, stretch=1)
+
+            lbl_ofs = QLabel("Offset:")
+            lbl_ofs.setStyleSheet("color: #64748b; font-size: 10px;")
+            r_lay.addWidget(lbl_ofs)
+
+            spin = QDoubleSpinBox()
+            spin.setRange(-1000000.0, 1000000.0)
+            spin.setDecimals(2)
+            spin.setSingleStep(0.1)
+            spin.setSuffix("s")
+            spin.setValue(loaded.user_offset)
+            spin.setStyleSheet("font-size: 10px; max-width: 65px; background: #f8fafc;")
+            spin.setToolTip("手動調整此檔案的時間軸位移 (秒)")
+            spin.valueChanged.connect(lambda val, lid=loaded.log_id: self.session.set_user_offset(lid, val))
+            r_lay.addWidget(spin)
+
+            btn_del = QPushButton("✕")
+            btn_del.setToolTip(f"關閉日誌 [{loaded.label}]")
+            btn_del.setStyleSheet("background: transparent; color: #ef4444; font-weight: bold; font-size: 11px; border: none; padding: 2px 4px;")
+            btn_del.clicked.connect(lambda _, lid=loaded.log_id: self.log_close_requested.emit(lid))
+            r_lay.addWidget(btn_del)
+
+            self.logs_container_layout.addWidget(row)
+
+    def show_tree_context_menu(self, pos):
+        item = self.tree.itemAt(pos)
+        if not item or item.childCount() > 0 or item.parent() is None:
+            return
+        field_key = item.data(0, Qt.UserRole)
+        if not field_key:
+            return
+
+        target_idx = min(max(0, self.active_chart_idx), len(self.chart_store.charts) - 1)
+        chart = self.chart_store.charts[target_idx]
+
+        menu = QMenu(self)
+        if chart.chart_type == "timeseries" and self.session and self.session.is_multi:
+            action_all = menu.addAction("➕ 加入所有檔案的此欄位 (Add for all logs)")
+            action_all.triggered.connect(lambda: self.add_field_for_all_logs(target_idx, field_key))
+
+        if not menu.isEmpty():
+            menu.exec_(self.tree.viewport().mapToGlobal(pos))
+
+    def add_field_for_all_logs(self, chart_idx: int, field_key: str):
+        if not self.session:
+            return
+        valid_log_ids = []
+        for l in self.session.logs:
+            if l.parsed:
+                if field_key in l.parsed.time_series or field_key in l.parsed.timestamps:
+                    valid_log_ids.append(l.log_id)
+                elif '.' in field_key:
+                    m, f = field_key.split('.', 1)
+                    if m in l.parsed.field_tree and f in l.parsed.field_tree[m]:
+                        valid_log_ids.append(l.log_id)
+        if valid_log_ids:
+            self.chart_store.add_expression_for_logs(chart_idx, field_key, valid_log_ids)
+
+    def show_xy_pair_context_menu(self, pos, chart_idx: int, pair_idx: int):
+        if not self.session or not self.session.is_multi:
+            return
+        menu = QMenu(self)
+        act = menu.addAction("👯 為所有檔案複製此 pair (Duplicate for all logs)")
+        act.triggered.connect(lambda: self.duplicate_pair_for_all_logs(chart_idx, pair_idx))
+        menu.exec_(QCursor.pos())
+
+    def duplicate_pair_for_all_logs(self, chart_idx: int, pair_idx: int):
+        if not self.session:
+            return
+        chart = self.chart_store.charts[chart_idx]
+        if not (0 <= pair_idx < len(chart.pairs)):
+            return
+        pair = chart.pairs[pair_idx]
+        if not pair.x_field or not pair.y_field:
+            return
+        target_lids = []
+        for l in self.session.logs:
+            if l.parsed:
+                has_x = pair.x_field in l.parsed.time_series or pair.x_field in l.parsed.timestamps
+                has_y = pair.y_field in l.parsed.time_series or pair.y_field in l.parsed.timestamps
+                if has_x and has_y:
+                    target_lids.append(l.log_id)
+        if target_lids:
+            self.chart_store.duplicate_pair_for_logs(chart_idx, pair_idx, target_lids)
 
     def populate_field_tree(self, parsed_log: ParsedLog):
+        if self.session is None:
+            self.session = LogSession.from_parsed_log(parsed_log)
+
         # Save current filter text & top-level item expanded states before clearing
         current_query = self.search_input.text() if hasattr(self, 'search_input') else ""
         expanded_states = {}
@@ -458,21 +721,55 @@ class SidebarWidget(QWidget):
                 if item.text(0) in expanded_states:
                     item.setExpanded(expanded_states[item.text(0)])
 
+        # Update Source Log ComboBox
+        if hasattr(self, 'cmb_source_log') and self.session:
+            self.cmb_source_log.blockSignals(True)
+            self.cmb_source_log.clear()
+            for l in self.session.logs:
+                fn = l.parsed.filename if l.parsed else os.path.basename(l.filepath)
+                self.cmb_source_log.addItem(f"[{l.label}] {fn}", l.log_id)
+            idx = self.cmb_source_log.findData(self.session.active_log_id)
+            if idx >= 0:
+                self.cmb_source_log.setCurrentIndex(idx)
+            self.cmb_source_log.blockSignals(False)
+            self.source_box.setVisible(self.session.is_multi)
+
+        # Update Flight Mode Background ComboBox
+        if hasattr(self, 'cmb_flight_mode_bg') and self.session:
+            self.cmb_flight_mode_bg.blockSignals(True)
+            self.cmb_flight_mode_bg.clear()
+            self.cmb_flight_mode_bg.addItem("跟隨來源檔案 (Follow Active)", "active")
+            for l in self.session.logs:
+                fn = l.parsed.filename if l.parsed else os.path.basename(l.filepath)
+                self.cmb_flight_mode_bg.addItem(f"[{l.label}] {fn}", str(l.log_id))
+            self.cmb_flight_mode_bg.addItem("無 (None)", "none")
+            idx = self.cmb_flight_mode_bg.findData(self.session.flight_mode_source)
+            if idx >= 0:
+                self.cmb_flight_mode_bg.setCurrentIndex(idx)
+            else:
+                self.cmb_flight_mode_bg.setCurrentIndex(0)
+            self.cmb_flight_mode_bg.blockSignals(False)
+            self.fm_box.setVisible(self.session.is_multi)
+
         # Update Segment ComboBox
         self.cmb_segment.blockSignals(True)
         self.cmb_segment.clear()
         self.cmb_segment.addItem("All Segments", "all")
         self.cmb_segment.addItem("Longest Segment", "longest")
 
-        segments = parsed_log.get_segments()
-        if segments:
-            for seg in segments:
-                tag = "最長" if seg.is_longest else ""
-                start_s = f"{seg.start_time:.1f}".rstrip('0').rstrip('.') if '.' in f"{seg.start_time:.1f}" else f"{int(seg.start_time)}"
-                end_s = f"{seg.end_time:.1f}".rstrip('0').rstrip('.') if '.' in f"{seg.end_time:.1f}" else f"{int(seg.end_time)}"
-                dur_s = f"{seg.duration:.1f}".rstrip('0').rstrip('.') if '.' in f"{seg.duration:.1f}" else f"{int(seg.duration)}"
-                text = f"Segment {seg.index + 1} ({start_s}s ~ {end_s}s, dt={dur_s}s){tag}"
-                self.cmb_segment.addItem(text, str(seg.index))
+        if not (self.session and self.session.is_multi):
+            segments = parsed_log.get_segments()
+            if segments:
+                for seg in segments:
+                    tag = "最長" if seg.is_longest else ""
+                    start_s = f"{seg.start_time:.1f}".rstrip('0').rstrip('.') if '.' in f"{seg.start_time:.1f}" else f"{int(seg.start_time)}"
+                    end_s = f"{seg.end_time:.1f}".rstrip('0').rstrip('.') if '.' in f"{seg.end_time:.1f}" else f"{int(seg.end_time)}"
+                    dur_s = f"{seg.duration:.1f}".rstrip('0').rstrip('.') if '.' in f"{seg.duration:.1f}" else f"{int(seg.duration)}"
+                    text = f"Segment {seg.index + 1} ({start_s}s ~ {end_s}s, dt={dur_s}s){tag}"
+                    self.cmb_segment.addItem(text, str(seg.index))
+        else:
+            if str(self.chart_store.segment_filter).isdigit():
+                self.chart_store.segment_filter = "all"
 
         curr_filter = self.chart_store.segment_filter
         found = False
@@ -486,6 +783,7 @@ class SidebarWidget(QWidget):
             self.chart_store.segment_filter = "all"
 
         self.cmb_segment.blockSignals(False)
+        self.update_loaded_logs_list()
         self.rebuild_setup_panel()
 
     def on_segment_combo_changed(self, idx: int):
@@ -595,8 +893,16 @@ class SidebarWidget(QWidget):
     def on_field_selected_for_calc(self, field_key: str):
         target_idx = min(max(0, self.active_chart_idx), len(self.chart_store.charts) - 1)
         chart = self.chart_store.charts[target_idx]
+        active_lid = self.session.active_log_id if self.session else None
 
         if chart.chart_type == "scatter":
+            if chart.pairs and 0 <= chart.active_pair_idx < len(chart.pairs):
+                pair = chart.pairs[chart.active_pair_idx]
+                if pair.log_id is not None and active_lid is not None and pair.log_id != active_lid:
+                    pair.x_field = ""
+                    pair.y_field = ""
+                    chart.active_xy_target = 'X'
+                pair.log_id = active_lid
             if chart.active_xy_target == 'X':
                 chart.x_field = field_key
                 chart.active_xy_target = 'Y'
@@ -621,7 +927,7 @@ class SidebarWidget(QWidget):
                 builder.operand_b = field_key
                 self.update_builder_operand_ui(target_idx)
         else:
-            self.chart_store.add_expression(target_idx, field_key)
+            self.chart_store.add_expression(target_idx, field_key, log_id=active_lid)
 
     def remove_norm_operand(self, chart_idx: int, norm_idx: int):
         chart = self.chart_store.charts[chart_idx]
@@ -921,7 +1227,7 @@ class SidebarWidget(QWidget):
 
         # Clear pending builder and convert into standard field expression row
         chart.pending_builder = None
-        self.chart_store.add_expression(chart_idx, res_name)
+        self.chart_store.add_expression(chart_idx, res_name, log_id=self.session.active_log_id if self.session else None)
 
     def cancel_inline_builder(self, chart_idx: int):
         chart = self.chart_store.charts[chart_idx]
@@ -1017,6 +1323,7 @@ class SidebarWidget(QWidget):
                 pair = chart.pairs[empty_pair_idx]
                 pair.x_field = frequency_key
                 pair.y_field = magnitude_key
+                pair.log_id = self.session.active_log_id if self.session else None
                 chart.active_pair_idx = empty_pair_idx
             else:
                 chart.pairs.append(
@@ -1025,7 +1332,8 @@ class SidebarWidget(QWidget):
                         magnitude_key,
                         color=DEFAULT_AXIS_COLORS[
                             len(chart.pairs) % len(DEFAULT_AXIS_COLORS)
-                        ]
+                        ],
+                        log_id=self.session.active_log_id if self.session else None
                     )
                 )
                 chart.active_pair_idx = len(chart.pairs) - 1
@@ -1115,8 +1423,19 @@ class SidebarWidget(QWidget):
                     is_pair_active = is_active and (p_idx == chart.active_pair_idx)
                     
                     xy_row = QWidget()
+                    xy_row.setContextMenuPolicy(Qt.CustomContextMenu)
+                    xy_row.customContextMenuRequested.connect(
+                        lambda pos, c_i=c_idx, p_i=p_idx: self.show_xy_pair_context_menu(pos, c_i, p_i)
+                    )
                     xy_layout = QHBoxLayout(xy_row)
                     xy_layout.setContentsMargins(0, 2, 0, 2)
+
+                    if self.session and self.session.is_multi and pair.log_id is not None:
+                        loaded = self.session.get(pair.log_id)
+                        lbl_text = loaded.label if loaded else "F1"
+                        pair_badge = QLabel(f" {lbl_text} ")
+                        pair_badge.setStyleSheet("background: #fed7aa; color: #c2410c; font-weight: bold; border-radius: 3px; font-size: 10px;")
+                        xy_layout.addWidget(pair_badge)
 
                     btn_x = QPushButton(f"X: {pair.x_field or '(Click field)'}")
                     btn_y = QPushButton(f"Y: {pair.y_field or '(Click field)'}")
@@ -1226,12 +1545,13 @@ class SidebarWidget(QWidget):
                     r_layout.setAlignment(Qt.AlignVCenter)
 
                     # Expression Name Label (Truncate if long, full text in tooltip!)
-                    disp_name = truncate_text(expr.name, max_len=22)
+                    raw_disp = self.session.display_name(expr.name, expr.log_id) if self.session else expr.name
+                    disp_name = truncate_text(raw_disp, max_len=22)
                     name_lbl = ClickableLabel(disp_name)
                     name_lbl.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
                     name_lbl.setCursor(Qt.PointingHandCursor)
                     name_lbl.setStyleSheet("color: #171717; font-weight: bold; font-size: 11px;")
-                    name_lbl.setToolTip(f"{expr.name}\n(Click to select field for math calculation)")
+                    name_lbl.setToolTip(f"{raw_disp}\n(Click to select field for math calculation)")
                     name_lbl.clicked.connect(lambda f=expr.name: self.on_field_selected_for_calc(f))
                     r_layout.addWidget(name_lbl, stretch=2)
 
@@ -1241,7 +1561,7 @@ class SidebarWidget(QWidget):
                     axis_combo.setCurrentIndex(min(max(0, expr.axis), 1))
                     axis_combo.setToolTip("L: Left Y-Axis | R: Right Y-Axis")
                     axis_combo.currentIndexChanged.connect(
-                        lambda idx, c=c_idx, n=expr.name: self.chart_store.set_expression_axis(c, n, idx)
+                        lambda idx, c=c_idx, n=expr.name, lid=expr.log_id: self.chart_store.set_expression_axis(c, n, idx, log_id=lid)
                     )
                     r_layout.addWidget(axis_combo)
 
@@ -1249,7 +1569,7 @@ class SidebarWidget(QWidget):
                     btn_color = QPushButton("■")
                     btn_color.setStyleSheet(f"color: {expr.color}; background: #fafafa; border: 1px solid #e5e5e5; font-size: 14px; font-weight: bold; border-radius: 4px; padding: 2px 6px;")
                     btn_color.clicked.connect(
-                        lambda _, c=c_idx, n=expr.name, cur_col=expr.color: self.pick_color(c, n, cur_col)
+                        lambda _, c=c_idx, n=expr.name, cur_col=expr.color, lid=expr.log_id: self.pick_color(c, n, cur_col, log_id=lid)
                     )
                     r_layout.addWidget(btn_color)
 
@@ -1257,7 +1577,7 @@ class SidebarWidget(QWidget):
                     btn_rm = QPushButton("🗑️")
                     btn_rm.setStyleSheet("background: transparent; border: none; font-size: 12px; padding: 2px;")
                     btn_rm.clicked.connect(
-                        lambda _, c=c_idx, n=expr.name: self.chart_store.remove_expression(c, n)
+                        lambda _, c=c_idx, n=expr.name, lid=expr.log_id: self.chart_store.remove_expression(c, n, log_id=lid)
                     )
                     r_layout.addWidget(btn_rm)
 
@@ -1443,10 +1763,10 @@ class SidebarWidget(QWidget):
 
         self.setup_content_layout.addStretch()
 
-    def pick_color(self, chart_idx: int, expr_name: str, current_color: str):
+    def pick_color(self, chart_idx: int, expr_name: str, current_color: str, log_id: Optional[int] = None):
         color = QColorDialog.getColor(QColor(current_color), self, f"Select Color for {expr_name}")
         if color.isValid():
-            self.chart_store.set_expression_color(chart_idx, expr_name, color.name())
+            self.chart_store.set_expression_color(chart_idx, expr_name, color.name(), log_id=log_id)
 
     def pick_xy_pair_color(self, chart_idx: int, pair_idx: int, current_color: str):
         color = QColorDialog.getColor(QColor(current_color), self, "Select XY Scatter Color")

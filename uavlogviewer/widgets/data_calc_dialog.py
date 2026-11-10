@@ -6,6 +6,7 @@ and FFT spectral analysis with automatic plot insertion.
 Dependencies: PySide6, numpy, base_parser, chart_store, vibration_fft.
 """
 import numpy as np
+from typing import Optional
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QListView,
                                QLineEdit, QPushButton, QRadioButton, QButtonGroup,
                                QGroupBox, QMessageBox, QWidget)
@@ -23,11 +24,12 @@ from uavlogviewer.tools.vibration_fft import (
 
 
 class DataCalcDialog(QDialog):
-    def __init__(self, parsed_log: ParsedLog, target_chart_idx: int, chart_store: ChartStore, parent=None):
+    def __init__(self, parsed_log: ParsedLog, target_chart_idx: int, chart_store: ChartStore, parent=None, log_id: Optional[int] = None):
         super().__init__(parent)
         self.parsed_log = parsed_log
         self.target_chart_idx = target_chart_idx
         self.chart_store = chart_store
+        self.log_id = log_id
 
         self.setWindowTitle(f"Data Math Calculation — Chart #{target_chart_idx + 1}")
         self.resize(480, 420)
@@ -299,7 +301,7 @@ class DataCalcDialog(QDialog):
             if field_sub not in self.parsed_log.field_tree["CALC"]:
                 self.parsed_log.field_tree["CALC"].append(field_sub)
 
-            self.chart_store.add_expression(self.target_chart_idx, res_name)
+            self.chart_store.add_expression(self.target_chart_idx, res_name, log_id=self.log_id)
 
         elif self.radio_scalar.isChecked():
             try:
@@ -328,7 +330,7 @@ class DataCalcDialog(QDialog):
             if field_sub not in self.parsed_log.field_tree["CALC"]:
                 self.parsed_log.field_tree["CALC"].append(field_sub)
 
-            self.chart_store.add_expression(self.target_chart_idx, res_name)
+            self.chart_store.add_expression(self.target_chart_idx, res_name, log_id=self.log_id)
 
         elif self.radio_vibe.isChecked():
             if self.op_combo.currentIndex() == 0:
@@ -360,7 +362,7 @@ class DataCalcDialog(QDialog):
             if res_name not in self.parsed_log.field_tree["CALC"]:
                 self.parsed_log.field_tree["CALC"].append(res_name)
 
-            self.chart_store.add_expression(self.target_chart_idx, res_name)
+            self.chart_store.add_expression(self.target_chart_idx, res_name, log_id=self.log_id)
 
         elif self.radio_fft.isChecked():
             seg_t, seg_y, fs = extract_fft_segment(t_a, y_a, mode=self.chart_store.segment_filter)
