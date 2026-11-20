@@ -46,6 +46,7 @@ class ChartPanel:
         self.active_pair_idx: int = 0
         self.active_xy_target: str = 'X'  # 'X' or 'Y'
         self.max_points: int = 10000 if chart_type == "timeseries" else 5000  # Default max rendering points (0 for Unlimited / full resolution)
+        self.equal_aspect: bool = False  # Scatter only: lock X:Y scale to 1:1
 
     @property
     def x_field(self) -> str:
@@ -141,6 +142,21 @@ class ChartStore(QObject):
         if 0 <= chart_idx < len(self.charts) and len(self.charts) > 1:
             self.charts.pop(chart_idx)
             self.updated.emit()
+
+    def set_equal_aspect(self, chart_idx: int, enabled: bool):
+        if 0 <= chart_idx < len(self.charts) and self.charts[chart_idx].chart_type == "scatter":
+            self.charts[chart_idx].equal_aspect = bool(enabled)
+            self.updated.emit()
+
+    def toggle_equal_aspect_all_scatter(self):
+        """Toggle 1:1 on all scatter charts: turn on if any is off, otherwise turn all off."""
+        scatters = [c for c in self.charts if c.chart_type == "scatter"]
+        if not scatters:
+            return
+        target = not all(c.equal_aspect for c in scatters)
+        for c in scatters:
+            c.equal_aspect = target
+        self.updated.emit()
 
     def clear_chart(self, chart_idx: int):
         if 0 <= chart_idx < len(self.charts):

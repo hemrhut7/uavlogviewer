@@ -10,6 +10,7 @@ import math
 from typing import Any, Optional, Tuple
 import numpy as np
 import plotly.graph_objects as go
+from plotly.utils import PlotlyJSONEncoder
 from plotly.subplots import make_subplots
 from uavlogviewer.parsers.base_parser import ParsedLog, detect_segments_from_timestamps
 from uavlogviewer.models.chart_store import ChartStore
@@ -349,6 +350,10 @@ def generate_plotly_html(parsed_log: Any, chart_store: ChartStore, visible_range
 
             fig.update_xaxes(title_text=f"X: {last_x_key or 'None'}", showticklabels=True, row=r_scatter, col=1)
             fig.update_yaxes(title_text=f"Y: {last_y_key or 'None'}", secondary_y=False, row=r_scatter, col=1)
+            if getattr(chart, 'equal_aspect', False):
+                x_name = fig.get_subplot(r_scatter, 1, secondary_y=False).xaxis.plotly_name  # e.g. "xaxis3"
+                x_ref = "x" + x_name[len("xaxis"):]
+                fig.update_yaxes(scaleanchor=x_ref, scaleratio=1, secondary_y=False, row=r_scatter, col=1)
 
             first_time_r = int(time_axis_ids[0].replace("xaxis", "")) if time_axis_ids[0] != "xaxis" else 1
             first_match_key = "x" if first_time_r == 1 else f"x{first_time_r}"
@@ -504,6 +509,20 @@ def generate_plotly_html(parsed_log: Any, chart_store: ChartStore, visible_range
     }
 
     html_str = fig.to_html(include_plotlyjs=True, full_html=True, config=config_dict)
+
+    # Add a custom "1:1" modebar button (functions cannot be JSON-serialised, so patch the config literal).
+    if has_scatter:
+        config_json = json.dumps(config_dict, cls=PlotlyJSONEncoder)
+        eq_all = all(getattr(c, 'equal_aspect', False) for c in active_charts if c.chart_type == "scatter")
+        eq_title = "Unlock X:Y 1:1 scale" if eq_all else "Lock X:Y scale to 1:1"
+        eq_button = (
+            "{name:'equalAspect',title:" + json.dumps(eq_title) + ","
+            "icon:{width:24,height:24,path:'M3 3h18v18H3z M7 7h10v10H7z',transform:'matrix(1 0 0 1 0 0)'},"
+            "click:function(){document.title='ASPECT:'+Date.now();}}"
+        )
+        patched = "Object.assign(" + config_json + ",{modeBarButtonsToAdd:[" + eq_button + "]})"
+        if config_json in html_str:
+            html_str = html_str.replace(config_json, patched, 1)
 
     time_axis_ids_json = json.dumps(time_axis_ids)
 

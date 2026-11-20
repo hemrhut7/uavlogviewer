@@ -1667,7 +1667,22 @@ class SidebarWidget(QWidget):
                     QPushButton:hover { background-color: #ffedd5; }
                 """)
                 btn_add_pair.clicked.connect(lambda _, c_i=c_idx: self.chart_store.add_xy_pair(c_i))
-                card_layout.addWidget(btn_add_pair)
+                pair_btn_row = QHBoxLayout()
+                pair_btn_row.addWidget(btn_add_pair, stretch=1)
+
+                btn_clear_xy = QPushButton("Clear All")
+                btn_clear_xy.setObjectName(f"clear_all_scatter_button_{c_idx}")
+                btn_clear_xy.setToolTip(f"清空 XY Scatter #{c_idx + 1} 上所有 XY pair")
+                btn_clear_xy.setEnabled(any(p.x_field or p.y_field for p in chart.pairs) or len(chart.pairs) > 1)
+                btn_clear_xy.setStyleSheet("""
+                    QPushButton { background-color: #fef2f2; color: #dc2626; font-weight: bold; border: 1px solid #fecaca; border-radius: 4px; padding: 4px; font-size: 11px; }
+                    QPushButton:hover { background-color: #fee2e2; }
+                    QPushButton:disabled { background-color: #f5f5f5; color: #a3a3a3; border: 1px solid #e5e5e5; }
+                """)
+                btn_clear_xy.clicked.connect(lambda _, idx=c_idx: self.chart_store.clear_chart(idx))
+                btn_clear_xy.setStyleSheet(btn_clear_xy.styleSheet() + "QPushButton { margin-top: 4px; }")
+                pair_btn_row.addWidget(btn_clear_xy)
+                card_layout.addLayout(pair_btn_row)
 
                 self.setup_content_layout.addWidget(card)
                 continue

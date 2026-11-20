@@ -229,6 +229,10 @@ class PlotContainer(QWidget):
                 pass
             return
 
+        if title.startswith("ASPECT:"):
+            self.chart_store.toggle_equal_aspect_all_scatter()
+            return
+
         if not title.startswith("RANGE:") or not self.parsed_log:
             return
 
